@@ -1,0 +1,45 @@
+#lang racket
+(define (char-ident? c)
+  (and (not (char-whitespace? c))
+       (not (member c (string->list "()")))))
+
+(define (skip-whitespace port)
+  (let ((c (peek-char port)))
+    (cond
+      ((eof-object? c) #f)
+      ((char-whitespace? c) (read-char port) (skip-whitespace port))
+      (else #t))))
+(define (parse-ident port)
+  (let ((c (read-char port)))
+    (string-append
+     (string c)
+     (let ((d (peek-char port)))
+       (if (and (not (eof-object? d)) (char-ident? d))
+           (parse-ident port)
+           "")))))
+
+(define (parse-number port acc)
+  (let* ((c (read-char port))
+         (acc (+ (* acc 10) (- (char->integer c) (char->integer #\0)))))
+    (let ((d (peek-char port)))
+      (if (and (not (eof-object? d)) (char-numeric? d))
+          (parse-number port acc)
+          acc))))
+
+(define (parse-sexpr port)
+  (let ((c (peek-char port)))
+    (cond
+      ((eof-object? c) #f)
+      ((char-numeric? c) (parse-number port 0))
+      ((char-ident? c) (string->symbol (parse-ident port)))
+      ((equal? c #\()
+       (read-char port)
+       (let loop ((sexprs '()))
+         (let ((e (parse-sexpr port)))
+           (skip-whitespace port)
+           (cond
+             (e (loop (append sexprs (list e))))
+             ((port-closed? port) 'pclose)
+             ((equal? (peek-char port) #\)) (read-char port) sexprs)
+             (else #f)))))
+      (else #f))))

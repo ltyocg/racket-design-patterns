@@ -1,0 +1,6 @@
+#lang rhombus
+fun label(x :: Indexable && Appendable):
+  use_static
+  if x[0]
+  | x ++ x
+  | x
