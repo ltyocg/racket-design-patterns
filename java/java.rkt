@@ -1,9 +1,7 @@
 #lang racket
-
 (require parser-tools/lex
          (prefix-in : parser-tools/lex-sre)
          parser-tools/yacc)
-
 ;; ============================================================================
 ;; Java Lexer & Parser
 ;; Based on ANTLR Java grammar: https://github.com/antlr/grammars-v4/tree/master/java/java
@@ -14,53 +12,41 @@
 ;; Token Definitions
 ;; ----------------------------------------------------------------------------
 
-(define-tokens tokens
-  (IDENTIFIER      ; 标识符
-   DECIMAL_LITERAL ; 十进制整数
-   HEX_LITERAL     ; 十六进制整数
-   OCT_LITERAL     ; 八进制整数
-   BINARY_LITERAL  ; 二进制整数
-   FLOAT_LITERAL   ; 浮点数
-   HEX_FLOAT_LITERAL ; 十六进制浮点数
-   CHAR_LITERAL    ; 字符字面量
-   STRING_LITERAL  ; 字符串字面量
-   TEXT_BLOCK      ; 文本块 (Java 15+)
-   BOOL_LITERAL    ; 布尔字面量 (带值)
-   ))
-
 (define-empty-tokens keywords
-  ;; Java keywords
   (ABSTRACT ASSERT BOOLEAN BREAK BYTE CASE CATCH CHAR CLASS CONST CONTINUE
             DEFAULT DO DOUBLE ELSE ENUM EXTENDS FINAL FINALLY FLOAT FOR GOTO IF
             IMPLEMENTS IMPORT INSTANCEOF INT INTERFACE LONG NATIVE NEW PACKAGE PRIVATE
             PROTECTED PUBLIC RETURN SHORT STATIC STRICTFP SUPER SWITCH SYNCHRONIZED
             THIS THROW THROWS TRANSIENT TRY VOID VOLATILE WHILE
 
-            ;; Java 10+ type inference
-            VAR
+            ; Java 8+ tokens
+            ARROW COLONCOLON
 
-            ;; Java 14+ switch expressions
-            YIELD
-
-            ;; Java 15+ sealed classes
-            SEALED NON_SEALED PERMITS
-
-            ;; Java 14+ records
-            RECORD
-
-            ;; Java 9+ modules
+            ; Java 9+ modules
             MODULE OPEN EXPORTS OPENS REQUIRES TRANSITIVE USES PROVIDES TO WITH
 
-            ;; Java 17+ pattern matching
+            ; Java 10+ type inference
+            VAR
+
+            ; Java 14+ switch expressions
+            YIELD
+
+            ; Java 14+ records
+            RECORD
+
+            ; Java 15+ sealed classes
+            SEALED NON_SEALED PERMITS
+
+            ; Java 17+ pattern matching
             WHEN
 
-            ;; Literals
+            ; Literals
             NULL_LITERAL
 
-            ;; Separators
+            ; Separators
             LPAREN RPAREN LBRACE RBRACE LBRACK RBRACK SEMI COMMA DOT
 
-            ;; Operators
+            ; Operators
             ASSIGN GT LT BANG TILDE QUESTION COLON
             EQUAL LE GE NOTEQUAL AND OR
             INC DEC ADD SUB MUL DIV BITAND BITOR CARET MOD
@@ -68,20 +54,28 @@
             AND_ASSIGN OR_ASSIGN XOR_ASSIGN MOD_ASSIGN
             LSHIFT_ASSIGN RSHIFT_ASSIGN URSHIFT_ASSIGN
 
-            ;; Java 8+ tokens
-            ARROW COLONCOLON
-
-            ;; Additional symbols
+            ; Additional symbols
             AT ELLIPSIS
 
-            ;; Shift operators
+            ; Shift operators
             LSHIFT RSHIFT URSHIFT
 
-            ;; instanceof
-            INSTANCEOF_OP
-
-            ;; End of file
+            ; End of file
             EOF))
+
+(define-tokens literals
+  (IDENTIFIER        ; 标识符
+   DECIMAL_LITERAL   ; 十进制整数
+   HEX_LITERAL       ; 十六进制整数
+   OCT_LITERAL       ; 八进制整数
+   BINARY_LITERAL    ; 二进制整数
+   FLOAT_LITERAL     ; 浮点数
+   HEX_FLOAT_LITERAL ; 十六进制浮点数
+   CHAR_LITERAL      ; 字符字面量
+   STRING_LITERAL    ; 字符串字面量
+   TEXT_BLOCK        ; 文本块 (Java 15+)
+   BOOL_LITERAL      ; 布尔字面量 (带值)
+   ))
 
 ;; ----------------------------------------------------------------------------
 ;; Lexer
@@ -281,7 +275,7 @@
    ["if" (token-IF)]
    ["implements" (token-IMPLEMENTS)]
    ["import" (token-IMPORT)]
-   ["instanceof" (token-INSTANCEOF_OP)]
+   ["instanceof" (token-INSTANCEOF)]
    ["int" (token-INT)]
    ["interface" (token-INTERFACE)]
    ["long" (token-LONG)]
@@ -411,7 +405,7 @@
   (parser
    (start compilation-unit)
    (end EOF)
-   (tokens tokens keywords)
+   (tokens literals keywords)
    (src-pos)
    (error (lambda (tok-ok? tok-name tok-value start end)
             (error 'java-parser "Parse error at line ~a, col ~a: ~a ~a"
@@ -857,8 +851,8 @@
      [(relational-expr GT shift-expr) (ast-binary-expr '> $1 $3)]
      [(relational-expr LE shift-expr) (ast-binary-expr '<= $1 $3)]
      [(relational-expr GE shift-expr) (ast-binary-expr '>= $1 $3)]
-     [(relational-expr INSTANCEOF_OP type) (ast-instanceof-expr $1 $3 #f)]
-     [(relational-expr INSTANCEOF_OP type IDENTIFIER) (ast-instanceof-expr $1 $3 $4)])
+     [(relational-expr INSTANCEOF type) (ast-instanceof-expr $1 $3 #f)]
+     [(relational-expr INSTANCEOF type IDENTIFIER) (ast-instanceof-expr $1 $3 $4)])
 
     (shift-expr
      [(additive-expr) $1]

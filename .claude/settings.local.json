@@ -8,7 +8,9 @@
       "WebFetch(domain:github.com)",
       "WebFetch(domain:raw.githubusercontent.com)",
       "Bash(curl:*)",
-      "mcp__idea__get_file_problems"
+      "mcp__idea__get_file_problems",
+      "mcp__ide__getDiagnostics",
+      "Bash(raco test:*)"
     ]
   }
 }
