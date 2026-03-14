@@ -10,7 +10,9 @@
       "Bash(curl:*)",
       "mcp__idea__get_file_problems",
       "mcp__ide__getDiagnostics",
-      "Bash(raco test:*)"
+      "Bash(raco test:*)",
+      "Bash(git checkout antlr/parser.rkt)",
+      "Bash(raco docs parser-tools/yacc 2>&1 | head -5 || echo \"Checking online docs...\")"
     ]
   }
 }
