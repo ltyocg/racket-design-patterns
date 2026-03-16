@@ -12,7 +12,8 @@
       "mcp__ide__getDiagnostics",
       "Bash(raco test:*)",
       "Bash(git checkout antlr/parser.rkt)",
-      "Bash(raco docs parser-tools/yacc 2>&1 | head -5 || echo \"Checking online docs...\")"
+      "Bash(raco docs parser-tools/yacc 2>&1 | head -5 || echo \"Checking online docs...\")",
+      "Bash(racket -e '\\(collection-file-path \"\"\"\"lex.rkt\"\"\"\" \"\"\"\"parser-tools\"\"\"\"\\)')"
     ]
   }
 }
