@@ -117,42 +117,44 @@
    [(:: #\' (:or (:: #\\ any-char) (char-complement #\')) #\')
     (token-CHAR_LITERAL (string-ref lexeme 1))]
 
-   ;; Hex float literal: 0x...p...
+   ;; Hex float literal: 0x...p... (supports underscores and hex digits)
    [(:: (:or "0x" "0X")
-        (:+ (:or numeric #\_))
+        (:+ (:or numeric #\a #\b #\c #\d #\e #\f
+                 #\A #\B #\C #\D #\E #\F #\_))
         (:or "." "")
-        (:* (:or numeric #\_))
+        (:* (:or numeric #\a #\b #\c #\d #\e #\f
+                 #\A #\B #\C #\D #\E #\F #\_))
         (:or "p" "P")
         (:? (:or "+" "-"))
         (:+ numeric)
         (:? (:or "f" "F" "d" "D")))
     (token-HEX_FLOAT_LITERAL lexeme)]
 
-   ;; Float literal with decimal point
-   [(:: (:+ numeric)
+   ;; Float literal with decimal point (supports underscores)
+   [(:: (:+ (:or numeric #\_))
         #\.
-        (:* numeric)
-        (:? (:: (:or "e" "E") (:? (:or "+" "-")) (:+ numeric)))
+        (:* (:or numeric #\_))
+        (:? (:: (:or "e" "E") (:? (:or "+" "-")) (:+ (:or numeric #\_))))
         (:? (:or "f" "F" "d" "D")))
     (token-FLOAT_LITERAL lexeme)]
 
-   ;; Float literal starting with decimal point
+   ;; Float literal starting with decimal point (supports underscores)
    [(:: #\.
-        (:+ numeric)
-        (:? (:: (:or "e" "E") (:? (:or "+" "-")) (:+ numeric)))
+        (:+ (:or numeric #\_))
+        (:? (:: (:or "e" "E") (:? (:or "+" "-")) (:+ (:or numeric #\_))))
         (:? (:or "f" "F" "d" "D")))
     (token-FLOAT_LITERAL lexeme)]
 
-   ;; Float literal with exponent only
-   [(:: (:+ numeric)
+   ;; Float literal with exponent only (supports underscores)
+   [(:: (:+ (:or numeric #\_))
         (:or "e" "E")
         (:? (:or "+" "-"))
-        (:+ numeric)
+        (:+ (:or numeric #\_))
         (:? (:or "f" "F" "d" "D")))
     (token-FLOAT_LITERAL lexeme)]
 
-   ;; Float literal with suffix only
-   [(:: (:+ numeric)
+   ;; Float literal with suffix only (supports underscores)
+   [(:: (:+ (:or numeric #\_))
         (:or "f" "F" "d" "D"))
     (token-FLOAT_LITERAL lexeme)]
 
@@ -412,6 +414,26 @@
                    (position-line start) (position-col start)
                    tok-name tok-value)))
 
+   ;; Precedence declarations - lower number = lower precedence
+   ;; This helps resolve shift/reduce conflicts
+   (precs
+    (left INC DEC)           ; postfix inc/dec
+    (right ASSIGN ADD_ASSIGN SUB_ASSIGN MUL_ASSIGN DIV_ASSIGN MOD_ASSIGN
+           AND_ASSIGN OR_ASSIGN XOR_ASSIGN LSHIFT_ASSIGN RSHIFT_ASSIGN URSHIFT_ASSIGN)
+    (right QUESTION COLON)
+    (left OR)
+    (left AND)
+    (left BITOR)
+    (left CARET)
+    (left BITAND)
+    (left EQUAL NOTEQUAL)
+    (left LT GT LE GE INSTANCEOF)
+    (left LSHIFT RSHIFT URSHIFT)
+    (left ADD SUB)
+    (left MUL DIV MOD)
+    (right BANG TILDE)
+    (left DOT LBRACK LPAREN))
+
    (grammar
     ;; Compilation unit
     (compilation-unit
@@ -427,10 +449,29 @@
      [(import-decl import-decl*) (cons $1 $2)])
 
     (import-decl
-     [(IMPORT qualified-name SEMI) (list 'import $2 #f)]
-     [(IMPORT qualified-name DOT MUL SEMI) (list 'import $2 'all)]
-     [(IMPORT STATIC qualified-name SEMI) (list 'import-static $3 #f)]
-     [(IMPORT STATIC qualified-name DOT MUL SEMI) (list 'import-static $3 'all)])
+     ;; Static import with wildcard: import static java.lang.System.*;
+     [(IMPORT STATIC import-wildcard-path SEMI)
+      (list 'import-static $3 'all)]
+     ;; Static import without wildcard: import static java.lang.System.out;
+     [(IMPORT STATIC import-path SEMI)
+      (list 'import-static $3 #f)]
+     ;; Import with wildcard: import java.util.*;
+     [(IMPORT import-wildcard-path SEMI)
+      (list 'import $2 'all)]
+     ;; Import without wildcard: import java.util.Random;
+     [(IMPORT import-path SEMI)
+      (list 'import $2 #f)])
+
+    ;; Import wildcard path - ends with .*
+    ;; Handles: java.util.* -> returns "java.util"
+    (import-wildcard-path
+     [(IDENTIFIER DOT MUL) $1]
+     [(IDENTIFIER DOT import-wildcard-path) (string-append $1 "." $3)])
+
+    ;; Import path - similar to qualified-name but used specifically for imports
+    (import-path
+     [(IDENTIFIER) $1]
+     [(IDENTIFIER DOT import-path) (string-append $1 "." $3)])
 
     (type-decl*
      [() '()]
@@ -442,6 +483,7 @@
      [(interface-decl) $1]
      [(enum-decl) $1]
      [(record-decl) $1]
+     [(annotation-decl) $1]
      [(modifier* class-decl-no-mods)
       (struct-copy ast-class-decl $2 [modifiers (append $1 (ast-class-decl-modifiers $2))])]
      [(modifier* interface-decl-no-mods)
@@ -475,12 +517,20 @@
     (class-decl
      [(CLASS IDENTIFIER class-body)
       (ast-class-decl '() $2 '() #f '() '() $3)]
+     [(CLASS IDENTIFIER type-params class-body)
+      (ast-class-decl '() $2 $3 #f '() '() $4)]
      [(CLASS IDENTIFIER EXTENDS type class-body)
       (ast-class-decl '() $2 '() $4 '() '() $5)]
+     [(CLASS IDENTIFIER type-params EXTENDS type class-body)
+      (ast-class-decl '() $2 $3 $5 '() '() $6)]
      [(CLASS IDENTIFIER IMPLEMENTS type-list class-body)
       (ast-class-decl '() $2 '() #f $4 '() $5)]
+     [(CLASS IDENTIFIER type-params IMPLEMENTS type-list class-body)
+      (ast-class-decl '() $2 $3 #f $5 '() $6)]
      [(CLASS IDENTIFIER EXTENDS type IMPLEMENTS type-list class-body)
       (ast-class-decl '() $2 '() $4 $6 '() $7)]
+     [(CLASS IDENTIFIER type-params EXTENDS type IMPLEMENTS type-list class-body)
+      (ast-class-decl '() $2 $3 $5 $7 '() $8)]
      [(CLASS IDENTIFIER IMPLEMENTS type-list PERMITS type-list class-body)
       (ast-class-decl '() $2 '() #f $4 $6 $7)]
      [(CLASS IDENTIFIER EXTENDS type IMPLEMENTS type-list PERMITS type-list class-body)
@@ -489,12 +539,20 @@
     (class-decl-no-mods
      [(CLASS IDENTIFIER class-body)
       (ast-class-decl '() $2 '() #f '() '() $3)]
+     [(CLASS IDENTIFIER type-params class-body)
+      (ast-class-decl '() $2 $3 #f '() '() $4)]
      [(CLASS IDENTIFIER EXTENDS type class-body)
       (ast-class-decl '() $2 '() $4 '() '() $5)]
+     [(CLASS IDENTIFIER type-params EXTENDS type class-body)
+      (ast-class-decl '() $2 $3 $5 '() '() $6)]
      [(CLASS IDENTIFIER IMPLEMENTS type-list class-body)
       (ast-class-decl '() $2 '() #f $4 '() $5)]
+     [(CLASS IDENTIFIER type-params IMPLEMENTS type-list class-body)
+      (ast-class-decl '() $2 $3 #f $5 '() $6)]
      [(CLASS IDENTIFIER EXTENDS type IMPLEMENTS type-list class-body)
-      (ast-class-decl '() $2 '() $4 $6 '() $7)])
+      (ast-class-decl '() $2 '() $4 $6 '() $7)]
+     [(CLASS IDENTIFIER type-params EXTENDS type IMPLEMENTS type-list class-body)
+      (ast-class-decl '() $2 $3 $5 $7 '() $8)])
 
     (class-body
      [(LBRACE class-body-decl* RBRACE) $2])
@@ -509,7 +567,13 @@
      [(method-decl) (list $1)]
      [(constructor-decl) (list $1)]
      [(STATIC block) (list (ast-block $2))]
-     [(block) (list (ast-block $1))])
+     [(block) (list (ast-block $1))]
+     [(class-decl) (list $1)]
+     [(interface-decl) (list $1)]
+     [(enum-decl) (list $1)]
+     [(modifier* class-decl-no-mods) (list $2)]
+     [(modifier* interface-decl-no-mods) (list $2)]
+     [(modifier* enum-decl-no-mods) (list $2)])
 
     ;; Interface declaration
     (interface-decl
@@ -541,8 +605,12 @@
     (interface-method-decl
      [(type IDENTIFIER LPAREN param-list? RPAREN SEMI)
       (ast-method-decl '() '() $1 $2 $4 '() #f)]
+     [(VOID IDENTIFIER LPAREN param-list? RPAREN SEMI)
+      (ast-method-decl '() '() 'void $2 $4 '() #f)]
      [(type IDENTIFIER LPAREN param-list? RPAREN DEFAULT block)
-      (ast-method-decl '() '() $1 $2 $4 '() $7)])
+      (ast-method-decl '() '() $1 $2 $4 '() $7)]
+     [(VOID IDENTIFIER LPAREN param-list? RPAREN DEFAULT block)
+      (ast-method-decl '() '() 'void $2 $4 '() $7)])
 
     ;; Enum declaration
     (enum-decl
@@ -571,6 +639,25 @@
     (enum-body-decls?
      [() '()]
      [(SEMI class-body-decl*) $2])
+
+    ;; Annotation declaration (@interface)
+    (annotation-decl
+     [(AT INTERFACE IDENTIFIER annotation-body)
+      (ast-interface-decl '(annotation) $3 '() '() '() $4)])
+
+    (annotation-body
+     [(LBRACE annotation-body-decl* RBRACE) $2])
+
+    (annotation-body-decl*
+     [() '()]
+     [(annotation-body-decl annotation-body-decl*) (append $1 $2)])
+
+    (annotation-body-decl
+     [(SEMI) '()]
+     [(type IDENTIFIER LPAREN RPAREN SEMI)
+      (list (ast-method-decl '() '() $1 $2 '() '() #f))]
+     [(type IDENTIFIER LPAREN RPAREN DEFAULT expr SEMI)
+      (list (ast-method-decl '() '() $1 $2 '() '() #f))])
 
     ;; Record declaration (Java 14+)
     (record-decl
@@ -675,13 +762,20 @@
      [(FINAL type IDENTIFIER) (ast-formal-param '(final) $2 #f $3)]
      [(FINAL type ELLIPSIS IDENTIFIER) (ast-formal-param '(final) $2 #t $4)])
 
-    ;; Type
+    ;; Type - note: array-dims only matches empty brackets [], not [expr]
+    ;; We handle class-or-interface-type separately to avoid conflicts with array access
     (type
      [(primitive-type) (ast-type $1 '() 0)]
      [(primitive-type array-dims) (ast-type $1 '() $2)]
-     [(qualified-name) (ast-type $1 '() 0)]
-     [(qualified-name type-args) (ast-type $1 $2 0)]
-     [(qualified-name array-dims) (ast-type $1 '() $2)])
+     [(class-or-interface-type) (ast-type $1 '() 0)]
+     [(class-or-interface-type type-args) (ast-type $1 $2 0)]
+     [(class-or-interface-type array-dims) (ast-type $1 '() $2)])
+
+    ;; Class or interface type - similar to qualified-name but only used in type contexts
+    ;; This avoids reduce/reduce conflicts with array access expressions
+    (class-or-interface-type
+     [(IDENTIFIER) $1]
+     [(IDENTIFIER DOT class-or-interface-type) (string-append $1 "." $3)])
 
     (primitive-type
      [(BOOLEAN) 'boolean]
@@ -696,6 +790,18 @@
 
     (type-args
      [(LT type-list GT) $2])
+
+    (type-params
+     [(LT type-param-list GT) $2])
+
+    (type-param-list
+     [(type-param) (list $1)]
+     [(type-param COMMA type-param-list) (cons $1 $3)])
+
+    (type-param
+     [(IDENTIFIER) (ast-type-param $1 '())]
+     [(IDENTIFIER EXTENDS type) (ast-type-param $1 (list $3))]
+     [(IDENTIFIER EXTENDS type BITAND type-list) (ast-type-param $1 (cons $3 $5))])
 
     (type-list
      [(type) (list $1)]
@@ -720,9 +826,38 @@
      [(type-decl) $1])
 
     (local-var-decl
-     [(type var-declarators SEMI) (ast-local-var-decl '() $1 $2)]
-     [(FINAL type var-declarators SEMI) (ast-local-var-decl '(final) $2 $3)]
-     [(VAR IDENTIFIER ASSIGN expr SEMI) (ast-local-var-decl '() 'var (list (ast-var-declarator $2 $4 0)))])
+     ;; Primitive type declarations - unambiguous because primitive keywords can't start expressions
+     [(primitive-type array-dims var-declarators SEMI) (ast-local-var-decl '() (ast-type $1 '() $2) $3)]
+     [(primitive-type var-declarators SEMI) (ast-local-var-decl '() (ast-type $1 '() 0) $2)]
+     [(FINAL primitive-type array-dims var-declarators SEMI) (ast-local-var-decl '(final) (ast-type $2 '() $3) $4)]
+     [(FINAL primitive-type var-declarators SEMI) (ast-local-var-decl '(final) (ast-type $2 '() 0) $3)]
+     ;; Class type with array dimensions: String[] x = ...
+     ;; This is unambiguous because [] must be empty for type declarations
+     [(IDENTIFIER array-dims var-declarators SEMI) (ast-local-var-decl '() (ast-type $1 '() $2) $3)]
+     [(FINAL IDENTIFIER array-dims var-declarators SEMI) (ast-local-var-decl '(final) (ast-type $2 '() $3) $4)]
+     ;; Qualified type with array dimensions: java.lang.String[] x = ...
+     [(qualified-type-name array-dims var-declarators SEMI) (ast-local-var-decl '() (ast-type $1 '() $2) $3)]
+     [(FINAL qualified-type-name array-dims var-declarators SEMI) (ast-local-var-decl '(final) (ast-type $2 '() $3) $4)]
+     ;; Simple class type declarations - IDENTIFIER followed by IDENTIFIER (name then variable)
+     ;; This pattern: TypeName varName; or TypeName varName = value;
+     [(IDENTIFIER IDENTIFIER SEMI) (ast-local-var-decl '() (ast-type $1 '() 0) (list (ast-var-declarator $2 #f 0)))]
+     [(IDENTIFIER IDENTIFIER ASSIGN expr SEMI) (ast-local-var-decl '() (ast-type $1 '() 0) (list (ast-var-declarator $2 $4 0)))]
+     [(FINAL IDENTIFIER IDENTIFIER SEMI) (ast-local-var-decl '(final) (ast-type $2 '() 0) (list (ast-var-declarator $3 #f 0)))]
+     [(FINAL IDENTIFIER IDENTIFIER ASSIGN expr SEMI) (ast-local-var-decl '(final) (ast-type $2 '() 0) (list (ast-var-declarator $3 $5 0)))]
+     ;; Qualified type name declarations: java.lang.String x = ...
+     [(qualified-type-name IDENTIFIER SEMI) (ast-local-var-decl '() (ast-type $1 '() 0) (list (ast-var-declarator $2 #f 0)))]
+     [(qualified-type-name IDENTIFIER ASSIGN expr SEMI) (ast-local-var-decl '() (ast-type $1 '() 0) (list (ast-var-declarator $2 $4 0)))]
+     [(FINAL qualified-type-name IDENTIFIER SEMI) (ast-local-var-decl '(final) (ast-type $2 '() 0) (list (ast-var-declarator $3 #f 0)))]
+     [(FINAL qualified-type-name IDENTIFIER ASSIGN expr SEMI) (ast-local-var-decl '(final) (ast-type $2 '() 0) (list (ast-var-declarator $3 $5 0)))]
+     ;; VAR type inference - unambiguous
+     [(VAR IDENTIFIER ASSIGN expr SEMI) (ast-local-var-decl '() 'var (list (ast-var-declarator $2 $4 0)))]
+     [(FINAL VAR IDENTIFIER ASSIGN expr SEMI) (ast-local-var-decl '(final) 'var (list (ast-var-declarator $3 $5 0)))])
+
+    ;; Qualified type name for declarations - must have at least one DOT
+    ;; This distinguishes it from simple IDENTIFIER (which could be an expression)
+    (qualified-type-name
+     [(IDENTIFIER DOT IDENTIFIER) (string-append $1 "." $3)]
+     [(IDENTIFIER DOT qualified-type-name) (string-append $1 "." $3)])
 
     ;; Statements
     (stmt
@@ -731,7 +866,12 @@
      [(IF LPAREN expr RPAREN stmt ELSE stmt) (ast-if-stmt $3 $5 $7)]
      [(WHILE LPAREN expr RPAREN stmt) (ast-while-stmt $3 $5)]
      [(DO stmt WHILE LPAREN expr RPAREN SEMI) (ast-do-stmt $2 $5)]
-     [(FOR LPAREN for-control RPAREN stmt) $3]
+     [(FOR LPAREN for-init? SEMI expr? SEMI expr-list? RPAREN stmt)
+      (ast-for-stmt $3 $5 $7 $9)]
+     [(FOR LPAREN FINAL type IDENTIFIER COLON expr RPAREN stmt)
+      (ast-enhanced-for-stmt '(final) $4 $5 $7 $9)]
+     [(FOR LPAREN type IDENTIFIER COLON expr RPAREN stmt)
+      (ast-enhanced-for-stmt '() $3 $4 $6 $8)]
      [(SWITCH LPAREN expr RPAREN LBRACE switch-case* RBRACE)
       (ast-switch-stmt $3 $6)]
      [(RETURN SEMI) (ast-return-stmt #f)]
@@ -764,22 +904,17 @@
      [() #f]
      [(FINALLY block) $2])
 
-    ;; For control
-    (for-control
-     [(for-init? SEMI expr? SEMI expr-list? stmt)
-      (ast-for-stmt $1 $3 $5 $6)]
-     [(FINAL type IDENTIFIER COLON expr stmt)
-      (ast-enhanced-for-stmt '(final) $2 $3 $5 $6)]
-     [(type IDENTIFIER COLON expr stmt)
-      (ast-enhanced-for-stmt '() $1 $2 $4 $5)])
-
     (for-init?
      [() #f]
      [(for-init) $1])
 
     (for-init
-     [(local-var-decl) $1]
+     [(for-local-var-decl) $1]
      [(expr-list) $1])
+
+    (for-local-var-decl
+     [(type var-declarators) (ast-local-var-decl '() $1 $2)]
+     [(FINAL type var-declarators) (ast-local-var-decl '(final) $2 $3)])
 
     ;; Switch cases
     (switch-case*
@@ -814,7 +949,14 @@
      [(ternary-expr ADD_ASSIGN assignment-expr) (ast-assign-expr '+= $1 $3)]
      [(ternary-expr SUB_ASSIGN assignment-expr) (ast-assign-expr '-= $1 $3)]
      [(ternary-expr MUL_ASSIGN assignment-expr) (ast-assign-expr '*= $1 $3)]
-     [(ternary-expr DIV_ASSIGN assignment-expr) (ast-assign-expr '/= $1 $3)])
+     [(ternary-expr DIV_ASSIGN assignment-expr) (ast-assign-expr '/= $1 $3)]
+     [(ternary-expr MOD_ASSIGN assignment-expr) (ast-assign-expr '%= $1 $3)]
+     [(ternary-expr AND_ASSIGN assignment-expr) (ast-assign-expr '&= $1 $3)]
+     [(ternary-expr OR_ASSIGN assignment-expr) (ast-assign-expr 'bitwise-or= $1 $3)]
+     [(ternary-expr XOR_ASSIGN assignment-expr) (ast-assign-expr '^= $1 $3)]
+     [(ternary-expr LSHIFT_ASSIGN assignment-expr) (ast-assign-expr '<<= $1 $3)]
+     [(ternary-expr RSHIFT_ASSIGN assignment-expr) (ast-assign-expr '>>= $1 $3)]
+     [(ternary-expr URSHIFT_ASSIGN assignment-expr) (ast-assign-expr '>>>= $1 $3)])
 
     (ternary-expr
      [(or-expr) $1]
@@ -872,7 +1014,7 @@
      [(multiplicative-expr MOD unary-expr) (ast-binary-expr '% $1 $3)])
 
     (unary-expr
-     [(pre-inc-expr) $1]
+     [(postfix-expr) $1]
      [(ADD unary-expr) (ast-unary-expr '+ $2 #t)]
      [(SUB unary-expr) (ast-unary-expr '- $2 #t)]
      [(INC unary-expr) (ast-unary-expr '++ $2 #t)]
@@ -880,32 +1022,41 @@
      [(BANG unary-expr) (ast-unary-expr '! $2 #t)]
      [(TILDE unary-expr) (ast-unary-expr '~ $2 #t)])
 
-    (pre-inc-expr
-     [(postfix-expr) $1])
-
-    (postfix-expr
-     [(primary) $1]
-     [(postfix-expr INC) (ast-unary-expr '++ $1 #f)]
-     [(postfix-expr DEC) (ast-unary-expr '-- $1 #f)])
-
+    ;; Primary handles base expressions
     (primary
      [(LPAREN expr RPAREN) $2]
      [(literal) $1]
      [(THIS) (ast-identifier 'this)]
      [(SUPER) (ast-identifier 'super)]
      [(IDENTIFIER) (ast-identifier $1)]
-     [(primary DOT IDENTIFIER) (ast-field-access $1 $3)]
-     [(primary DOT THIS) (ast-field-access $1 'this)]
-     [(primary DOT SUPER) (ast-field-access $1 'super)]
-     [(primary LPAREN arg-list? RPAREN) (ast-method-call #f $1 $3)]
-     [(IDENTIFIER LPAREN arg-list? RPAREN) (ast-method-call #f $1 $3)]
-     [(primary LBRACK expr RBRACK) (ast-array-access $1 $3)]
      [(NEW creator) $2]
      [(LPAREN type RPAREN unary-expr) (ast-cast-expr $2 $4)])
+
+    ;; Postfix-expr handles all trailing operations: field access, method call, array access, postfix inc/dec
+    ;; Also handles qualified names as field access chains
+    (postfix-expr
+     [(primary) $1]
+     [(IDENTIFIER LPAREN arg-list? RPAREN) (ast-method-call #f $1 $3)]
+     [(IDENTIFIER DOT CLASS) (ast-field-access (ast-identifier $1) 'class)]
+     [(IDENTIFIER DOT postfix-expr-tail) (build-field-access-chain (ast-identifier $1) $3)]
+     [(postfix-expr DOT IDENTIFIER) (ast-field-access $1 $3)]
+     [(postfix-expr DOT CLASS) (ast-field-access $1 'class)]
+     [(postfix-expr DOT THIS) (ast-field-access $1 'this)]
+     [(postfix-expr DOT SUPER) (ast-field-access $1 'super)]
+     [(postfix-expr LPAREN arg-list? RPAREN) (ast-method-call #f $1 $3)]
+     [(postfix-expr LBRACK expr RBRACK) (ast-array-access $1 $3)]
+     [(postfix-expr INC) (ast-unary-expr '++ $1 #f)]
+     [(postfix-expr DEC) (ast-unary-expr '-- $1 #f)])
+
+    ;; Tail of a qualified name - helps with parsing
+    (postfix-expr-tail
+     [(IDENTIFIER) $1]
+     [(IDENTIFIER DOT postfix-expr-tail) (cons $1 $3)])
 
     (creator
      [(IDENTIFIER LPAREN arg-list? RPAREN) (ast-new-object $1 $3 #f)]
      [(IDENTIFIER LPAREN arg-list? RPAREN class-body) (ast-new-object $1 $3 $5)]
+     [(IDENTIFIER array-creator) (ast-new-array $1 (car $2) (cdr $2))]
      [(primitive-type array-creator) (ast-new-array $1 (car $2) (cdr $2))])
 
     (array-creator
@@ -946,8 +1097,81 @@
      [(expr) $1]))))
 
 ;; ----------------------------------------------------------------------------
+;; Exports
+;; ----------------------------------------------------------------------------
+
+(provide java-lexer
+         java-parser
+         parse-java-code
+         tokenize-java
+         position-token-token
+         position-token-start-pos
+         position-line
+         position-col
+         ast-compilation-unit
+         ast-class-decl
+         ast-interface-decl
+         ast-enum-decl
+         ast-record-decl
+         ast-field-decl
+         ast-method-decl
+         ast-constructor-decl
+         ast-block
+         ast-if-stmt
+         ast-while-stmt
+         ast-do-stmt
+         ast-for-stmt
+         ast-enhanced-for-stmt
+         ast-switch-stmt
+         ast-switch-case
+         ast-return-stmt
+         ast-throw-stmt
+         ast-try-stmt
+         ast-catch-clause
+         ast-synchronized-stmt
+         ast-assert-stmt
+         ast-break-stmt
+         ast-continue-stmt
+         ast-yield-stmt
+         ast-expr-stmt
+         ast-local-var-decl
+         ast-literal
+         ast-identifier
+         ast-binary-expr
+         ast-unary-expr
+         ast-ternary-expr
+         ast-assign-expr
+         ast-method-call
+         ast-field-access
+         ast-array-access
+         ast-new-object
+         ast-new-array
+         ast-cast-expr
+         ast-instanceof-expr
+         ast-lambda-expr
+         ast-method-ref
+         ast-annotation
+         ast-type
+         ast-type-param
+         ast-var-declarator
+         ast-formal-param)
+
+;; ----------------------------------------------------------------------------
 ;; Helper Functions
 ;; ----------------------------------------------------------------------------
+
+;; Build a chain of field-access expressions from an identifier list
+;; e.g., (build-field-access-chain base '("prePost")) => (ast-field-access base "prePost")
+;; e.g., (build-field-access-chain base '("b" "c")) => (ast-field-access (ast-field-access base "b") "c")
+(define (build-field-access-chain base identifiers)
+  (if (string? identifiers)
+      (ast-field-access base identifiers)
+      (let loop ([result base]
+                 [ids (if (list? identifiers) identifiers (list identifiers))])
+        (if (null? ids)
+            result
+            (loop (ast-field-access result (car ids))
+                  (cdr ids))))))
 
 ;; Lexing helper
 (define (lex-this lexer input)
@@ -1017,6 +1241,251 @@
   (displayln "--- Syntax Analysis ---")
   (displayln "AST:")
   (pretty-print (parse-java-code sample-java-code)))
+
+;; ----------------------------------------------------------------------------
+;; Tests
+;; ----------------------------------------------------------------------------
+
+(module+ test
+  (require rackunit)
+
+  ;; Test helper: parse and check no error (wraps code in a class)
+  (define (parse-successfully code)
+    (with-handlers ([exn:fail? (lambda (e)
+                                 (displayln (format "Parse error: ~a" (exn-message e)))
+                                 #f)])
+      (parse-java-code code)
+      #t))
+
+  ;; Test helper: parse a class body statement
+  (define (parse-class-stmt stmt)
+    (parse-successfully (format "class Test { ~a }" stmt)))
+
+  ;; Test helper: parse and return result
+  (define (parse-result code)
+    (with-handlers ([exn:fail? (lambda (e) (cons 'error (exn-message e)))])
+      (cons 'success (parse-java-code code))))
+
+  ;; ---- Basic Token Tests ----
+  ;; Note: tokenizer doesn't include EOF in count, and whitespace is skipped
+
+  (test-case "Basic tokenization"
+    (check-equal? (length (tokenize-java "int x = 5;")) 5
+                  "Simple statement should have 5 tokens (int, x, =, 5, ;)")
+    (check-equal? (length (tokenize-java "public class Foo {}")) 5
+                  "Simple class should have 5 tokens (public, class, Foo, {, })"))
+
+  ;; ---- Numeric Literal Tests (inside a class) ----
+
+  (test-case "Numeric literals from AllInOne7.java"
+    (check-true (parse-class-stmt "long creditCardNumber = 1234_5678_9012_3456L;"))
+    (check-true (parse-class-stmt "long socialSecurityNumber = 999_99_9999L;"))
+    (check-true (parse-class-stmt "float pi = 3.14_15F;"))
+    (check-true (parse-class-stmt "long hexBytes = 0xFF_EC_DE_5E;"))
+    (check-true (parse-class-stmt "long hexWords = 0xCAFE_BABE;"))
+    (check-true (parse-class-stmt "long maxLong = 0x7fff_ffff_ffff_ffffL;"))
+    (check-true (parse-class-stmt "byte nybbles = 0b0010_0101;"))
+    (check-true (parse-class-stmt "long bytes = 0b11010010_01101001_10010100_10010010;"))
+    (check-true (parse-class-stmt "long lastReceivedMessageId = 0L;"))
+    (check-true (parse-class-stmt "double hexDouble1 = 0x1.0p0;"))
+    (check-true (parse-class-stmt "double hexDouble2 = 0x1.956ad0aae33a4p117;"))
+    (check-true (parse-class-stmt "int octal = 01234567;"))
+    (check-true (parse-class-stmt "long hexUpper = 0x1234567890ABCDEFL;"))
+    (check-true (parse-class-stmt "long hexLower = 0x1234567890abcedfl;")))
+
+  ;; ---- Operator Tests ----
+
+  (test-case "Arithmetic operators"
+    (check-true (parse-class-stmt "int result = x + y;"))
+    (check-true (parse-class-stmt "int result = x - y;"))
+    (check-true (parse-class-stmt "int result = x * y;"))
+    (check-true (parse-class-stmt "int result = y / x;"))
+    (check-true (parse-class-stmt "int result = x % 3;")))
+
+  (test-case "Unary operators"
+    (check-true (parse-class-stmt "int result = +x;"))
+    (check-true (parse-class-stmt "int result = -y;"))
+    (check-true (parse-class-stmt "int result = ++x;"))
+    (check-true (parse-class-stmt "int result = --y;"))
+    (check-true (parse-class-stmt "boolean not_ok = !ok;")))
+
+  (test-case "Prefix and postfix increment/decrement"
+    (check-true (parse-class-stmt "void m() { ++x; }"))
+    (check-true (parse-class-stmt "void m() { x++; }"))
+    (check-true (parse-class-stmt "void m() { --y; }"))
+    (check-true (parse-class-stmt "void m() { y--; }"))
+    (check-true (parse-class-stmt "void m() { LexerTest.prePost++; }"))
+    (check-true (parse-class-stmt "void m() { LexerTest.prePost--; }"))
+    (check-true (parse-class-stmt "void m() { ++LexerTest.prePost; }"))
+    (check-true (parse-class-stmt "void m() { --LexerTest.prePost; }"))
+    (check-true (parse-class-stmt "void m() { this.prePost++; }"))
+    (check-true (parse-class-stmt "void m() { super.prePost++; }"))
+    (check-true (parse-class-stmt "void m() { ++this.prePost; }"))
+    (check-true (parse-class-stmt "void m() { ++super.prePost; }"))
+    (check-true (parse-class-stmt "void m() { someMethod()[0]++; }"))
+    (check-true (parse-class-stmt "void m() { ++someMethod()[0]; }")))
+
+  (test-case "Relational operators"
+    (check-true (parse-class-stmt "boolean result = x == y;"))
+    (check-true (parse-class-stmt "boolean result = x != y;"))
+    (check-true (parse-class-stmt "boolean result = x > y;"))
+    (check-true (parse-class-stmt "boolean result = x >= y;"))
+    (check-true (parse-class-stmt "boolean result = x < y;"))
+    (check-true (parse-class-stmt "boolean result = x <= y;")))
+
+  (test-case "Conditional operators"
+    (check-true (parse-class-stmt "void m() { if ((x > 8) && (y > 8)) {} }"))
+    (check-true (parse-class-stmt "void m() { if ((x > 10) || (y > 10)) {} }"))
+    (check-true (parse-class-stmt "int result = (x > 10) ? x : y;"))
+    (check-true (parse-class-stmt "int f = b1 ? b2 : b3 ? 3 : 4;")))
+
+  (test-case "Bitwise and Bit shift operators"
+    (check-true (parse-class-stmt "int result = ~x;"))
+    (check-true (parse-class-stmt "int result = x << 1;"))
+    (check-true (parse-class-stmt "int result = x >> 2;"))
+    (check-true (parse-class-stmt "int result = x >>> 3;"))
+    (check-true (parse-class-stmt "int result = x & 4;"))
+    (check-true (parse-class-stmt "int result = x ^ 5;"))
+    (check-true (parse-class-stmt "int result = x | 6;")))
+
+  (test-case "Assignment operators"
+    (check-true (parse-class-stmt "void m() { result = x; }"))
+    (check-true (parse-class-stmt "void m() { result += x; }"))
+    (check-true (parse-class-stmt "void m() { result -= x; }"))
+    (check-true (parse-class-stmt "void m() { result *= x; }"))
+    (check-true (parse-class-stmt "void m() { result /= x; }"))
+    (check-true (parse-class-stmt "void m() { result %= x; }"))
+    (check-true (parse-class-stmt "void m() { result &= x; }"))
+    (check-true (parse-class-stmt "void m() { result ^= x; }"))
+    (check-true (parse-class-stmt "void m() { result |= x; }"))
+    (check-true (parse-class-stmt "void m() { result <<= x; }"))
+    (check-true (parse-class-stmt "void m() { result >>= x; }"))
+    (check-true (parse-class-stmt "void m() { result >>>= x; }")))
+
+  ;; ---- Control Flow Tests ----
+
+  (test-case "If statements"
+    (check-true (parse-class-stmt "void m() { if (i == 3) doSomething(); }"))
+    (check-true (parse-class-stmt "void m() { if (i == 2) { doSomething(); } else { doSomethingElse(); } }"))
+    (check-true (parse-class-stmt "void m() { if (i == 3) { doSomething(); } else if (i == 2) { doSomethingElse(); } else { doSomethingDifferent(); } }")))
+
+  (test-case "Switch statements"
+    (check-true (parse-class-stmt "void m() { switch (ch) { case 'A': doSomething(); break; case 'B': case 'C': doSomethingElse(); break; default: doSomethingDifferent(); break; } }")))
+
+  (test-case "While and do-while statements"
+    (check-true (parse-class-stmt "void m() { while (i < 10) { doSomething(); } }"))
+    (check-true (parse-class-stmt "void m() { do { doSomething(); } while (i < 10); }")))
+
+  (test-case "For statements"
+    (check-true (parse-class-stmt "void m() { for (int i = 0; i < 10; i++) { doSomething(); } }"))
+    (check-true (parse-class-stmt "void m() { for (int i = 0, j = 9; i < 10; i++, j -= 3) { doSomething(); } }"))
+    (check-true (parse-class-stmt "void m() { for (;;) { doSomething(); } }"))
+    (check-true (parse-class-stmt "void m() { for (int i : intArray) { doSomething(i); } }")))
+
+  (test-case "Break and continue with labels"
+    (check-true (parse-class-stmt "void m() { break; }"))
+    (check-true (parse-class-stmt "void m() { break outer; }"))
+    (check-true (parse-class-stmt "void m() { continue; }"))
+    (check-true (parse-class-stmt "void m() { continue outer; }")))
+
+  (test-case "Return statements"
+    (check-true (parse-class-stmt "void m() { return; }"))
+    (check-true (parse-class-stmt "int m() { return result; }")))
+
+  (test-case "Exception handling"
+    (check-true (parse-class-stmt "void m() { try { methodThrowingExceptions(); } catch (Exception ex) { reportException(ex); } finally { freeResources(); } }"))
+    (check-true (parse-class-stmt "void m() { try { methodThrowingExceptions(); } catch (IOException | IllegalArgumentException ex) { reportException(ex); } }"))
+    (check-true (parse-class-stmt "void m() { throw new NullPointerException(); }")))
+
+  (test-case "Synchronized statement"
+    (check-true (parse-class-stmt "void m() { synchronized (someObject) { } }")))
+
+  (test-case "Assert statement"
+    (check-true (parse-class-stmt "void m() { assert n != 0; }"))
+    (check-true (parse-class-stmt "void m() { assert n != 0 : \"n was equal to zero\"; }")))
+
+  ;; ---- Class and Interface Tests ----
+
+  (test-case "Class declarations"
+    (check-true (parse-successfully "class Foo { }"))
+    (check-true (parse-successfully "public class Foo { }"))
+    (check-true (parse-successfully "class Foo { class Bar { } }"))
+    (check-true (parse-successfully "class Foo { static class Bar { } }")))
+
+  (test-case "Interface declarations"
+    (check-true (parse-successfully "interface ActionListener { void actionSelected(int action); }"))
+    (check-true (parse-successfully "interface RequestListener { int requestReceived(); }"))
+    (check-true (parse-successfully "class ActionHandler implements ActionListener, RequestListener { }")))
+
+  (test-case "Enum declarations"
+    (check-true (parse-successfully "enum Season { WINTER, SPRING, SUMMER, AUTUMN }"))
+    (check-true (parse-successfully "public enum Season { WINTER, SPRING, SUMMER, AUTUMN; }")))
+
+  ;; ---- Method Tests ----
+
+  (test-case "Method declarations"
+    (check-true (parse-class-stmt "int bar(int a, int b) { return (a*2) + b; }"))
+    (check-true (parse-class-stmt "int bar(int a) { return a*2; }"))
+    (check-true (parse-class-stmt "void openStream() throws IOException, myException { }"))
+    (check-true (parse-class-stmt "void printReport(String header, int... numbers) { }")))
+
+  (test-case "Constructor declarations"
+    (check-true (parse-successfully "class Foo { Foo() { } }"))
+    (check-true (parse-successfully "class Foo { Foo(String str) { } }"))
+    (check-true (parse-successfully "class Foo { public Foo() { } }")))
+
+  (test-case "Static and instance initializers"
+    (check-true (parse-successfully "class Foo { static { } }"))
+    (check-true (parse-successfully "class Foo { { } }")))
+
+  ;; ---- Annotation Tests ----
+
+  (test-case "Annotation declarations"
+    (check-true (parse-successfully "@interface BlockingOperations { }"))
+    (check-true (parse-successfully "@interface BlockingOperations { boolean fileSystemOperations(); boolean networkOperations() default false; }")))
+
+  ;; ---- Generics Tests ----
+
+  (test-case "Generic class"
+    (check-true (parse-successfully "class Mapper<T, V> { }"))
+    (check-true (parse-successfully "class Mapper<T extends ArrayList, V> { }")))
+
+  ;; ---- Array Tests ----
+
+  (test-case "Array declarations and access"
+    (check-true (parse-class-stmt "int[] numbers = new int[5];"))
+    (check-true (parse-class-stmt "void m() { numbers[0] = 2; }"))
+    (check-true (parse-class-stmt "void m() { int x = numbers[0]; }")))
+
+  ;; ---- Import and Package Tests ----
+
+  (test-case "Package declaration"
+    (check-true (parse-successfully "package myapplication.mylibrary; class Foo { }")))
+
+  (test-case "Import declarations"
+    (check-true (parse-successfully "import java.util.Random; class Foo { }"))
+    (check-true (parse-successfully "import static java.lang.System.out; class Foo { }")))
+
+  ;; ---- Instanceof Tests ----
+
+  (test-case "Instanceof"
+    (check-true (parse-class-stmt "void m() { if(args instanceof String[]) { } }")))
+
+  ;; ---- Full File Parse Test ----
+
+  (test-case "Parse AllInOne7.java file"
+    (define java-file-path (build-path (current-directory) "example" "AllInOne7.java"))
+    (when (file-exists? java-file-path)
+      (define file-content (file->string java-file-path))
+      (define result (parse-result file-content))
+      (when (eq? (car result) 'error)
+        (displayln (format "Parse error: ~a" (cdr result))))
+      (check-equal? (car result) 'success
+                    (format "AllInOne7.java should parse successfully. Error: ~a"
+                            (if (eq? (car result) 'error) (cdr result) "none")))))
+
+  ;; Display test results summary
+  (displayln "=== Java Parser Tests Complete ==="))
 
 ;; Run
 (main)
