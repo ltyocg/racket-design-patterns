@@ -85,7 +85,7 @@
   (parser
    (start compilation-unit)
    (end EOF)
-   (tokens literals keywords)
+   (tokens empty-tokens tokens)
    (src-pos)
    (error (lambda (tok-ok? tok-name tok-value start end)
             (error 'java-parser "Parse error at line ~a, col ~a: ~a ~a"

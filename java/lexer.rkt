@@ -1,256 +1,181 @@
 #lang racket
 (require parser-tools/lex
-         (prefix-in : parser-tools/lex-sre))
-
-;; ============================================================================
-;; Java Lexer
-;; Based on ANTLR Java grammar: https://github.com/antlr/grammars-v4/tree/master/java/java
-;; Supports Java 17 features including records, sealed classes, pattern matching, etc.
-;; ============================================================================
-
-;; ----------------------------------------------------------------------------
-;; Token Definitions
-;; ----------------------------------------------------------------------------
-
-(define-empty-tokens keywords
-  (ABSTRACT ASSERT BOOLEAN BREAK BYTE CASE CATCH CHAR CLASS CONST CONTINUE
-            DEFAULT DO DOUBLE ELSE ENUM EXTENDS FINAL FINALLY FLOAT FOR GOTO IF
-            IMPLEMENTS IMPORT INSTANCEOF INT INTERFACE LONG NATIVE NEW PACKAGE PRIVATE
-            PROTECTED PUBLIC RETURN SHORT STATIC STRICTFP SUPER SWITCH SYNCHRONIZED
-            THIS THROW THROWS TRANSIENT TRY VOID VOLATILE WHILE
-
-            ; Java 8+ tokens
-            ARROW COLONCOLON
-
-            ; Java 9+ modules
-            MODULE OPEN EXPORTS OPENS REQUIRES TRANSITIVE USES PROVIDES TO WITH
-
-            ; Java 10+ type inference
-            VAR
-
-            ; Java 14+ switch expressions
-            YIELD
-
-            ; Java 14+ records
-            RECORD
-
-            ; Java 15+ sealed classes
-            SEALED NON_SEALED PERMITS
-
-            ; Java 17+ pattern matching
-            WHEN
-
-            ; Literals
-            NULL_LITERAL
-
-            ; Separators
-            LPAREN RPAREN LBRACE RBRACE LBRACK RBRACK SEMI COMMA DOT
-
-            ; Operators
-            ASSIGN GT LT BANG TILDE QUESTION COLON
-            EQUAL LE GE NOTEQUAL AND OR
-            INC DEC ADD SUB MUL DIV BITAND BITOR CARET MOD
-            ADD_ASSIGN SUB_ASSIGN MUL_ASSIGN DIV_ASSIGN
-            AND_ASSIGN OR_ASSIGN XOR_ASSIGN MOD_ASSIGN
-            LSHIFT_ASSIGN RSHIFT_ASSIGN URSHIFT_ASSIGN
-
-            ; Additional symbols
-            AT ELLIPSIS
-
-            ; Shift operators
-            LSHIFT RSHIFT URSHIFT
-
-            ; End of file
-            EOF))
-
-(define-tokens literals
-  (IDENTIFIER        ; 标识符
-   DECIMAL_LITERAL   ; 十进制整数
-   HEX_LITERAL       ; 十六进制整数
-   OCT_LITERAL       ; 八进制整数
-   BINARY_LITERAL    ; 二进制整数
-   FLOAT_LITERAL     ; 浮点数
-   HEX_FLOAT_LITERAL ; 十六进制浮点数
-   CHAR_LITERAL      ; 字符字面量
-   STRING_LITERAL    ; 字符串字面量
-   TEXT_BLOCK        ; 文本块 (Java 15+)
-   BOOL_LITERAL      ; 布尔字面量 (带值)
-   ))
-
-;; ----------------------------------------------------------------------------
-;; Lexer
-;; ----------------------------------------------------------------------------
+         (prefix-in : parser-tools/lex-sre)
+         racket/runtime-path)
+(define-empty-tokens empty-tokens
+  (ABSTRACT
+   ASSERT
+   BOOLEAN
+   BREAK
+   BYTE
+   CASE
+   CATCH
+   CHAR
+   CLASS
+   CONST
+   CONTINUE
+   DEFAULT
+   DO
+   DOUBLE
+   ELSE
+   ENUM
+   EXPORTS
+   EXTENDS
+   FINAL
+   FINALLY
+   FLOAT
+   FOR
+   GOTO
+   IF
+   IMPLEMENTS
+   IMPORT
+   INSTANCEOF
+   INT
+   INTERFACE
+   LONG
+   MODULE
+   NATIVE
+   NEW
+   NON_SEALED
+   OPEN
+   OPENS
+   PACKAGE
+   PERMITS
+   PRIVATE
+   PROTECTED
+   PROVIDES
+   PUBLIC
+   RECORD
+   REQUIRES
+   RETURN
+   SEALED
+   SHORT
+   STATIC
+   STRICTFP
+   SUPER
+   SWITCH
+   SYNCHRONIZED
+   THIS
+   THROW
+   THROWS
+   TO
+   TRANSIENT
+   TRANSITIVE
+   TRY
+   USES
+   VAR
+   VOID
+   VOLATILE
+   WHEN
+   WHILE
+   WITH
+   YIELD
+   NULL_LITERAL
+   LPAREN
+   RPAREN
+   LBRACE
+   RBRACE
+   LBRACK
+   RBRACK
+   SEMI
+   COMMA
+   DOT
+   ASSIGN
+   GT
+   LT
+   BANG
+   TILDE
+   QUESTION
+   COLON
+   EQUAL
+   LE
+   GE
+   NOTEQUAL
+   AND
+   OR
+   INC
+   DEC
+   ADD
+   SUB
+   MUL
+   DIV
+   BITAND
+   BITOR
+   CARET
+   MOD
+   ADD_ASSIGN
+   SUB_ASSIGN
+   MUL_ASSIGN
+   DIV_ASSIGN
+   AND_ASSIGN
+   OR_ASSIGN
+   XOR_ASSIGN
+   MOD_ASSIGN
+   LSHIFT_ASSIGN
+   RSHIFT_ASSIGN
+   URSHIFT_ASSIGN
+   ARROW
+   COLONCOLON
+   AT
+   ELLIPSIS
+   EOF))
+(define-tokens tokens
+  (DECIMAL_LITERAL
+   HEX_LITERAL
+   OCT_LITERAL
+   BINARY_LITERAL
+   FLOAT_LITERAL
+   HEX_FLOAT_LITERAL
+   BOOL_LITERAL
+   CHAR_LITERAL
+   STRING_LITERAL
+   TEXT_BLOCK
+   WS
+   COMMENT
+   LINE_COMMENT
+   IDENTIFIER))
+(define-lex-abbrev ExponentPart
+  (:: (char-set "eE")
+      (:? (char-set "+-"))
+      (:+ Digits)))
+(define-lex-abbrev EscapeSequence
+  (:or (:: #\\
+           (:? "u005c")
+           (char-set "bstnfr\"'\\"))
+       (:: #\\
+           (:? "u005c")
+           (:? (:: (:? (char-range #\0 #\3))
+                   (char-range #\0 #\7)))
+           (char-range #\0 #\7))
+       (:: #\\
+           (:+ #\u)
+           HexDigit
+           HexDigit
+           HexDigit
+           HexDigit)))
+(define-lex-abbrev HexDigits
+  (:: HexDigit
+      (:? (:: (:* (:or HexDigit #\_))
+              HexDigit))))
+(define-lex-abbrev HexDigit
+  (:or (char-range #\0 #\9)
+       (char-range #\a #\f)
+       (char-range #\A #\F)))
+(define-lex-abbrev Digits
+  (:: (char-range #\0 #\9)
+      (:? (:: (:or (char-range #\0 #\9) #\_)
+              (char-range #\0 #\9)))))
+(define-lex-abbrev LetterOrDigit
+  (:or Letter
+       (char-range #\0 #\9)))
+(define-lex-abbrev Letter
+  (:or (char-range #\a #\z)
+       (char-range #\A #\Z)
+       (char-set "$_")
+       (char-complement (char-range #\u0000 #\u007F))))
 
 (define java-lexer
   (lexer-src-pos
-   ;; Whitespace (skip)
-   [whitespace
-    (return-without-pos (java-lexer input-port))]
-
-   ;; Traditional comment /* ... */
-   ["/*"
-    (begin
-      (let loop ()
-        (let ([c (read-char input-port)])
-          (cond
-            [(eof-object? c) (error "Unterminated comment")]
-            [(and (char=? c #\*)
-                  (let ([next (peek-char input-port)])
-                    (and (char? next) (char=? next #\/))))
-             (read-char input-port)] ; consume the /
-            [else (loop)])))
-      (return-without-pos (java-lexer input-port)))]
-
-   ;; End-of-line comment // ...
-   [(:: "//" (:* (char-complement #\newline)))
-    (return-without-pos (java-lexer input-port))]
-
-   ;; Text Block (Java 15+): """ ... """
-   [(:: "\"\"\"" (:* (char-complement #\")) "\"\"\"")
-    (token-TEXT_BLOCK lexeme)]
-
-   ;; String literal
-   [(:: #\" (:* (:or (:: #\\ any-char) (char-complement #\"))) #\")
-    (token-STRING_LITERAL (substring lexeme 1 (- (string-length lexeme) 1)))]
-
-   ;; Character literal
-   [(:: #\' (:or (:: #\\ any-char) (char-complement #\')) #\')
-    (token-CHAR_LITERAL (string-ref lexeme 1))]
-
-   ;; Hex float literal: 0x...p... (supports underscores and hex digits)
-   [(:: (:or "0x" "0X")
-        (:+ (:or numeric #\a #\b #\c #\d #\e #\f
-                 #\A #\B #\C #\D #\E #\F #\_))
-        (:or "." "")
-        (:* (:or numeric #\a #\b #\c #\d #\e #\f
-                 #\A #\B #\C #\D #\E #\F #\_))
-        (:or "p" "P")
-        (:? (:or "+" "-"))
-        (:+ numeric)
-        (:? (:or "f" "F" "d" "D")))
-    (token-HEX_FLOAT_LITERAL lexeme)]
-
-   ;; Float literal with decimal point (supports underscores)
-   [(:: (:+ (:or numeric #\_))
-        #\.
-        (:* (:or numeric #\_))
-        (:? (:: (:or "e" "E") (:? (:or "+" "-")) (:+ (:or numeric #\_))))
-        (:? (:or "f" "F" "d" "D")))
-    (token-FLOAT_LITERAL lexeme)]
-
-   ;; Float literal starting with decimal point (supports underscores)
-   [(:: #\.
-        (:+ (:or numeric #\_))
-        (:? (:: (:or "e" "E") (:? (:or "+" "-")) (:+ (:or numeric #\_))))
-        (:? (:or "f" "F" "d" "D")))
-    (token-FLOAT_LITERAL lexeme)]
-
-   ;; Float literal with exponent only (supports underscores)
-   [(:: (:+ (:or numeric #\_))
-        (:or "e" "E")
-        (:? (:or "+" "-"))
-        (:+ (:or numeric #\_))
-        (:? (:or "f" "F" "d" "D")))
-    (token-FLOAT_LITERAL lexeme)]
-
-   ;; Float literal with suffix only (supports underscores)
-   [(:: (:+ (:or numeric #\_))
-        (:or "f" "F" "d" "D"))
-    (token-FLOAT_LITERAL lexeme)]
-
-   ;; Binary literal: 0b...
-   [(:: (:or "0b" "0B")
-        (:+ (:or #\0 #\1 #\_))
-        (:? (:or "l" "L")))
-    (token-BINARY_LITERAL lexeme)]
-
-   ;; Hex literal: 0x...
-   [(:: (:or "0x" "0X")
-        (:+ (:or numeric #\a #\b #\c #\d #\e #\f
-                 #\A #\B #\C #\D #\E #\F #\_))
-        (:? (:or "l" "L")))
-    (token-HEX_LITERAL lexeme)]
-
-   ;; Octal literal: 0...
-   [(:: #\0
-        (:+ (:or #\0 #\1 #\2 #\3 #\4 #\5 #\6 #\7 #\_))
-        (:? (:or "l" "L")))
-    (token-OCT_LITERAL lexeme)]
-
-   ;; Decimal literal
-   [(:: (:or #\0 (:: (char-range #\1 #\9) (:* (:or numeric #\_))))
-        (:? (:or "l" "L")))
-    (token-DECIMAL_LITERAL lexeme)]
-
-   ;; Ellipsis ...
-   ["..." (token-ELLIPSIS)]
-
-   ;; Double colon ::
-   ["::" (token-COLONCOLON)]
-
-   ;; Arrow ->
-   ["->" (token-ARROW)]
-
-   ;; Compound assignment operators (must come before simple operators)
-   [">>>=" (token-URSHIFT_ASSIGN)]
-   [">>=" (token-RSHIFT_ASSIGN)]
-   ["<<=" (token-LSHIFT_ASSIGN)]
-   ["+=" (token-ADD_ASSIGN)]
-   ["-=" (token-SUB_ASSIGN)]
-   ["*=" (token-MUL_ASSIGN)]
-   ["/=" (token-DIV_ASSIGN)]
-   ["%=" (token-MOD_ASSIGN)]
-   ["&=" (token-AND_ASSIGN)]
-   ["|=" (token-OR_ASSIGN)]
-   ["^=" (token-XOR_ASSIGN)]
-
-   ;; Shift operators (must come before single < >)
-   [">>>" (token-URSHIFT)]
-   [">>" (token-RSHIFT)]
-   ["<<" (token-LSHIFT)]
-
-   ;; Comparison operators
-   ["==" (token-EQUAL)]
-   ["!=" (token-NOTEQUAL)]
-   ["<=" (token-LE)]
-   [">=" (token-GE)]
-   ["&&" (token-AND)]
-   ["||" (token-OR)]
-
-   ;; Increment/decrement
-   ["++" (token-INC)]
-   ["--" (token-DEC)]
-
-   ;; Simple operators
-   ["=" (token-ASSIGN)]
-   [">" (token-GT)]
-   ["<" (token-LT)]
-   ["!" (token-BANG)]
-   ["~" (token-TILDE)]
-   ["?" (token-QUESTION)]
-   [":" (token-COLON)]
-   ["+" (token-ADD)]
-   ["-" (token-SUB)]
-   ["*" (token-MUL)]
-   ["/" (token-DIV)]
-   ["%" (token-MOD)]
-   ["&" (token-BITAND)]
-   ["|" (token-BITOR)]
-   ["^" (token-CARET)]
-
-   ;; Separators
-   ["{" (token-LBRACE)]
-   ["}" (token-RBRACE)]
-   ["(" (token-LPAREN)]
-   [")" (token-RPAREN)]
-   ["[" (token-LBRACK)]
-   ["]" (token-RBRACK)]
-   [";" (token-SEMI)]
-   ["," (token-COMMA)]
-   ["." (token-DOT)]
-   ["@" (token-AT)]
-
-   ;; Keywords - Java 17+
    ["abstract" (token-ABSTRACT)]
    ["assert" (token-ASSERT)]
    ["boolean" (token-BOOLEAN)]
@@ -318,22 +243,151 @@
    ["while" (token-WHILE)]
    ["with" (token-WITH)]
    ["yield" (token-YIELD)]
-
-   ;; Boolean and null literals
+   [(:: (:or #\0
+             (:: (char-range #\1 #\9)
+                 (:or (:? Digits)
+                      (:: (:+ #\_) Digits))))
+        (:? (char-set "lL")))
+    (token-DECIMAL_LITERAL (string->number lexeme))]
+   [(:: #\0
+        (char-set "xX")
+        (:or (char-range #\0 #\9)
+             (char-range #\a #\f)
+             (char-range #\A #\F))
+        (:? (:: (:* (:or (char-range #\0 #\9)
+                         (char-range #\a #\f)
+                         (char-range #\A #\F)
+                         #\_))
+                (:or (char-range #\0 #\9)
+                     (char-range #\a #\f)
+                     (char-range #\A #\F))))
+        (:? (char-set "lL")))
+    (token-HEX_LITERAL lexeme)]
+   [(:: #\0
+        (:* #\_)
+        (char-range #\0 #\7)
+        (:? (:: (:* (:or (char-range #\0 #\7)
+                         #\_))
+                (:or (char-range #\0 #\7))))
+        (:? (char-set "lL"))) 
+    (token-OCT_LITERAL lexeme)]
+   [(:: #\0
+        (char-set "bB")
+        (char-set "01")
+        (:? (:: (:* (:or (char-set "01")
+                         #\_))
+                (:or (char-set "01"))))
+        (:? (char-set "lL")))
+    (token-BINARY_LITERAL lexeme)]
+   [(:or (:: (:or (:: Digits #\. (:? Digits))
+                  (:: #\. Digits))
+             (:? ExponentPart)
+             (:? (char-set "fFdD")))
+         (:: Digits
+             (:or (:: ExponentPart (:? (char-set "fFdD")))
+                  (char-set "fFdD"))))
+    (token-FLOAT_LITERAL lexeme)]
+   [(:: #\0
+        (char-set "xX")
+        (:or (:: HexDigits (:? #\.))
+             (:: (:? HexDigits) #\. HexDigits))
+        (char-set "pP")
+        (:? (char-set "+-"))
+        Digits
+        (:? (char-set "fFdD")))
+    (token-HEX_FLOAT_LITERAL lexeme)]
    ["true" (token-BOOL_LITERAL #t)]
    ["false" (token-BOOL_LITERAL #f)]
+   [(:: #\'
+        (:or (char-complement (char-set "'\\\r\n"))
+             EscapeSequence)
+        #\')
+    (token-CHAR_LITERAL (string-ref lexeme 1))]
+   [(:: #\"
+        (:* (:or (char-complement (char-set "\"\\\r\n"))
+                 EscapeSequence))
+        #\")
+    (token-STRING_LITERAL (substring lexeme 1 (- (string-length lexeme) 1)))]
+   [(:: "\"\"\""
+        (:* (char-set " \t"))
+        (char-set "\r\n")
+        (:? (:* (:or any-char EscapeSequence)))
+        "\"\"\"")
+    (token-TEXT_BLOCK lexeme)]
    ["null" (token-NULL_LITERAL)]
-
-   ;; Identifier: Letter (Letter | Digit)*
-   [(:: (:or alphabetic #\_ #\$)
-        (:* (:or alphabetic numeric #\_ #\$)))
-    (token-IDENTIFIER lexeme)]
-
-   ;; End of file
+   ["(" (token-LPAREN)]
+   [")" (token-RPAREN)]
+   ["{" (token-LBRACE)]
+   ["}" (token-RBRACE)]
+   ["[" (token-LBRACK)]
+   ["]" (token-RBRACK)]
+   [";" (token-SEMI)]
+   ["," (token-COMMA)]
+   ["." (token-DOT)]
+   ["=" (token-ASSIGN)]
+   [">" (token-GT)]
+   ["<" (token-LT)]
+   ["!" (token-BANG)]
+   ["~" (token-TILDE)]
+   ["?" (token-QUESTION)]
+   [":" (token-COLON)]
+   ["==" (token-EQUAL)]
+   ["<=" (token-LE)]
+   [">=" (token-GE)]
+   ["!=" (token-NOTEQUAL)]
+   ["&&" (token-AND)]
+   ["||" (token-OR)]
+   ["++" (token-INC)]
+   ["--" (token-DEC)]
+   ["+" (token-ADD)]
+   ["-" (token-SUB)]
+   ["*" (token-MUL)]
+   ["/" (token-DIV)]
+   ["&" (token-BITAND)]
+   ["|" (token-BITOR)]
+   ["^" (token-CARET)]
+   ["%" (token-MOD)]
+   ["+=" (token-ADD_ASSIGN)]
+   ["-=" (token-SUB_ASSIGN)]
+   ["*=" (token-MUL_ASSIGN)]
+   ["/=" (token-DIV_ASSIGN)]
+   ["&=" (token-AND_ASSIGN)]
+   ["|=" (token-OR_ASSIGN)]
+   ["^=" (token-XOR_ASSIGN)]
+   ["%=" (token-MOD_ASSIGN)]
+   ["<<=" (token-LSHIFT_ASSIGN)]
+   [">>=" (token-RSHIFT_ASSIGN)]
+   [">>>=" (token-URSHIFT_ASSIGN)]
+   ["->" (token-ARROW)]
+   ["::" (token-COLONCOLON)]
+   ["@" (token-AT)]
+   ["..." (token-ELLIPSIS)]
+   [(:+ (char-set " \t\r\n\u000C")) (token-WS lexeme)]
+   [(:: "/*" (:? (:* any-char)) "*/") (token-COMMENT lexeme)]
+   [(:: "//" (:* (char-complement (char-set "\r\n")))) (token-LINE_COMMENT lexeme)]
+   [(:: Letter (:* LetterOrDigit)) (token-IDENTIFIER lexeme)]
    [(eof) (token-EOF)]))
 
-;; ----------------------------------------------------------------------------
-;; Exports
-;; ----------------------------------------------------------------------------
+(define (channel-token? channel tok)
+  (case channel
+    [(default) (and (member (token-name (position-token-token tok))
+                            '(WS COMMENT LINE_COMMENT))
+                    #t)]
+    [(hidden) #t]
+    [else #f]))
+
+(define (tokenize-java file #:channel [channel 'default])
+  (let ([input (open-input-file file)])
+    (let loop ([tokens '()])
+      (let ([tok (java-lexer input)])
+        (if (eq? (position-token-token tok) 'EOF)
+            (reverse tokens)
+            (loop (if (channel-token? channel tok)
+                      tokens
+                      (cons tok tokens))))))))
 
 (provide (all-defined-out))
+
+(module+ test
+  (define-runtime-path example-dir "./example")
+  (pretty-print (tokenize-java (build-path example-dir "Simple.java"))))
