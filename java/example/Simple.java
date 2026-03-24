@@ -1,0 +1,7 @@
+/**
+ * 注释
+ */
+class Test {
+    String str = "hello";
+    int number = 3;
+}
