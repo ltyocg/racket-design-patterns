@@ -386,8 +386,11 @@
                       tokens
                       (cons tok tokens))))))))
 
-(provide (all-defined-out))
+(provide empty-tokens
+         tokens
+         java-lexer
+         tokenize-java)
 
 (module+ test
   (define-runtime-path example-dir "./example")
-  (pretty-print (tokenize-java (build-path example-dir "Simple.java"))))
+  (pretty-print (tokenize-java (build-path example-dir "AllInOne17.java"))))
