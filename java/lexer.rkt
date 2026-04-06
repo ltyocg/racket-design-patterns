@@ -1,4 +1,4 @@
-#lang racket
+#lang racket/base
 (require parser-tools/lex
          (prefix-in : parser-tools/lex-sre)
          racket/runtime-path)
@@ -392,5 +392,6 @@
          tokenize-java)
 
 (module+ test
+  (require racket/pretty)
   (define-runtime-path example-dir "./example")
   (pretty-print (tokenize-java (build-path example-dir "AllInOne17.java"))))
