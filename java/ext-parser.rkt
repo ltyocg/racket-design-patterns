@@ -4,30 +4,12 @@
          (for-syntax racket/base
                      racket/list
                      racket/match
-                     racket/string
                      syntax/parse
                      parser-tools/private-lex/token-syntax))
 
 (begin-for-syntax
-  (define gensym-counter 0)
-  (define (reset-gensym!)
-    (set! gensym-counter 0))
-  (define (fresh base)
-    (set! gensym-counter (add1 gensym-counter))
-    (string->symbol
-     (format "__ext_~a_~a"
-             (regexp-replace* #rx"[^0-9A-Za-z_]+" (symbol->string base) "_")
-             gensym-counter)))
   (define (d$ n)
     (string->symbol (format "$~a" n)))
-
-  (define (symbol-prefix? s prefix)
-    (string-prefix? (symbol->string s) prefix))
-
-  (define (ensure-plain-symbol sym where)
-    (when (symbol-prefix? sym "~")
-      (error 'ext-parser
-             (format "~a 中的符号不能以 `~` 开头：~s" where sym))))
 
   (define (maybe-postfix-sugar sym defined-lhs)
     (if (memq sym defined-lhs)
@@ -37,99 +19,50 @@
                [last (and (> n 1) (string-ref str (sub1 n)))])
           (cond
             [(eqv? last #\?)
-             `(~opt ,(string->symbol (substring str 0 (sub1 n))))]
+             `(opt ,(string->symbol (substring str 0 (sub1 n))))]
             [(eqv? last #\*)
-             `(~rep0 ,(string->symbol (substring str 0 (sub1 n))))]
+             `(rep0 ,(string->symbol (substring str 0 (sub1 n))))]
             [(eqv? last #\+)
-             `(~rep1 ,(string->symbol (substring str 0 (sub1 n))))]
+             `(rep1 ,(string->symbol (substring str 0 (sub1 n))))]
             [else #f]))))
 
-  (define (operator-kind head defined-lhs)
-    (and (symbol? head)
-         (not (memq head defined-lhs))
-         (cond
-           [(memq head '(~seq seq)) 'seq]
-           [(memq head '(~or or alt)) 'or]
-           [(memq head '(~opt opt ?)) 'opt]
-           [(memq head '(~rep0 rep rep0 *)) 'rep0]
-           [(memq head '(~rep1 rep1 +)) 'rep1]
-           [else #f])))
-
   ;; triple = (list lhs rhs tag)
-  (define (lower expr base defined-lhs)
-    (define (lower-seq es)
-      (define roots '())
-      (define rules '())
-      (for ([e es])
-        (define-values (r rs) (lower e base defined-lhs))
-        (set! roots (append roots (list r)))
-        (set! rules (append rules rs)))
-      (define nt (fresh base))
-      (values nt
-              (append rules
-                      (list (list nt roots (if (null? roots) 'eps 'seq))))))
-
+  (define (lower expr defined-lhs)
     (match expr
       [(? symbol?)
-       (ensure-plain-symbol expr "EBNF 表达式")
        (define sugared (maybe-postfix-sugar expr defined-lhs))
-       (if sugared
-           (lower sugared base defined-lhs)
-           (values expr '()))]
-
-      [(list)
-       (define nt (fresh base))
-       (values nt (list (list nt '() 'eps)))]
-
-      [(list head es ...)
-       (define kind (operator-kind head defined-lhs))
        (cond
-         [(eq? kind 'seq)
-          (lower-seq es)]
-         [(eq? kind 'or)
-          (when (null? es)
-            (error 'ext-parser "~or/or 至少要有一个分支"))
-          (define nt (fresh base))
-          (define rules '())
-          (define own '())
-          (for ([e es])
-            (define-values (r rs) (lower e base defined-lhs))
-            (set! rules (append rules rs))
-            (set! own (append own (list (list nt (list r) 'or)))))
-          (values nt (append rules own))]
-         [(eq? kind 'opt)
-          (unless (= (length es) 1)
-            (error 'ext-parser "~opt/opt/? 需要且仅需要 1 个参数"))
-          (define-values (r rs) (lower (car es) base defined-lhs))
-          (define nt (fresh base))
-          (values nt
-                  (append rs
-                          (list (list nt '() 'opt-empty)
-                                (list nt (list r) 'opt-some))))]
-         [(eq? kind 'rep0)
-          (unless (= (length es) 1)
-            (error 'ext-parser "~rep0/rep0/* 需要且仅需要 1 个参数"))
-          (define-values (r rs) (lower (car es) base defined-lhs))
-          (define nt (fresh base))
-          (values nt
-                  (append rs
-                          (list (list nt '() 'rep0-empty)
-                                (list nt (list r nt) 'rep0-step))))]
-         [(eq? kind 'rep1)
-          (unless (= (length es) 1)
-            (error 'ext-parser "~rep1/rep1/+ 需要且仅需要 1 个参数"))
-          (define-values (r rs) (lower (car es) base defined-lhs))
-          (define nt* (fresh base))
-          (define nt+ (fresh base))
-          (values nt+
-                  (append rs
-                          (list (list nt* '() 'rep0-empty)
-                                (list nt* (list r nt*) 'rep0-step)
-                                (list nt+ (list r nt*) 'rep1-step))))]
+         [(not sugared)
+          (values expr '())]
          [else
-          (when (and (symbol? head) (symbol-prefix? head "~"))
-            (error 'ext-parser (format "未知扩展操作符：~s" head)))
-          (lower-seq expr)])]
+          (match sugared
+            [(list 'opt inner)
+             (define-values (r rs) (lower inner defined-lhs))
+             (define nt expr)
+             (values nt
+                     (append rs
+                             (list (list nt '() 'opt-empty)
+                                   (list nt (list r) 'opt-some))))]
+            [(list 'rep0 inner)
+             (define-values (r rs) (lower inner defined-lhs))
+             (define nt expr)
+             (values nt
+                     (append rs
+                             (list (list nt '() 'rep0-empty)
+                                   (list nt (list r nt) 'rep0-step))))]
+            [(list 'rep1 inner)
+             (define-values (r rs) (lower inner defined-lhs))
+             (define nt+ expr)
+             (define nt* (string->symbol
+                          (string-append (symbol->string inner) "*")))
+             (define user-defined-nt*? (memq nt* defined-lhs))
+             (define generated
+               (if user-defined-nt*?
+                   (list (list nt+ (list r nt*) 'rep1-step))
+                   (list (list nt* '() 'rep0-empty)
+                         (list nt* (list r nt*) 'rep0-step)
+                         (list nt+ (list r nt*) 'rep1-step))))
+             (values nt+ (append rs generated))])])]
 
       [_ (error 'ext-parser (format "不支持的 EBNF 表达式：~s" expr))]))
 
@@ -198,7 +131,11 @@
       (unless (hash-has-key? tbl lhs)
         (set! order (append order (list lhs))))
       (hash-update! tbl lhs
-                    (lambda (old) (append old (list (list rhs action))))
+                    (lambda (old)
+                      (define candidate (list rhs action))
+                      (if (member candidate old equal?)
+                          old
+                          (append old (list candidate))))
                     '()))
     (for/list ([lhs order])
       `(,lhs
@@ -210,22 +147,17 @@
     (remove-duplicates
      (for/list ([r rules-datum])
        (match r
-         [(list (? symbol? lhs) _ ...)
-          (ensure-plain-symbol lhs "grammar 左侧非终结符")
-          lhs]
+         [(list (? symbol? lhs) _ ...) lhs]
          [_ (error 'ext-parser
                    (format "grammar 规则必须是 [lhs production ...]，实际: ~s" r))]))))
 
   (define (normalize-production prod)
-    (cond
-      [(and (list? prod) (pair? prod) (list? (car prod)))
-       (values (car prod) (cdr prod))]
-      [else
-       ;; 兼容旧写法：[lhs expr]，视为单元素 RHS，动作默认取该值
-       (values (list prod) '())]))
+    (if (and (list? prod) (pair? prod) (list? (car prod)))
+        (values (car prod) (cdr prod))
+        (error 'ext-parser
+               (format "production 必须是 [(rhs-item ...) action ...]，实际: ~s" prod))))
 
   (define (transform-grammar-datum rules-datum empty-token-syms)
-    (reset-gensym!)
     (define defined-lhs (collect-defined-lhs rules-datum))
     (define helper-triples '())
     (define main-rules
@@ -238,7 +170,7 @@
                (define roots '())
                (define extras '())
                (for ([item rhs-items])
-                 (define-values (root rs) (lower item lhs defined-lhs))
+                 (define-values (root rs) (lower item defined-lhs))
                  (set! roots (append roots (list root)))
                  (set! extras (append extras rs)))
                (set! helper-triples (append helper-triples extras))
@@ -293,6 +225,21 @@
         [tokens value-tokens op-tokens]
         [grammar
          [expr
-          [((~or term NUM?)) $1]]
+          [(term) $1]
+          [(NUM?) $1]]
          [term
-          [((~opt NUM) (~rep0 (~or LPAREN RPAREN))) (list $1 $2)]]])))))
+          [(NUM? LPAREN* RPAREN+) (list $1 $2 $3)]]]))))
+  (pretty-display
+   (syntax->datum
+    (expand-once
+     #'(ext-parser
+        [start expr]
+        [end EOF]
+        [error (lambda args (error 'my-parser (format "parse error: ~s" args)))]
+        [tokens value-tokens op-tokens]
+        [grammar
+         [expr
+          [(NUM+) $1]]
+         [NUM*
+          [() 'user-empty]
+          [(NUM NUM*) (cons $1 $2)]]])))))
