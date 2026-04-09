@@ -11,6 +11,11 @@
   (define (d$ n)
     (string->symbol (format "$~a" n)))
 
+  (define (push-list-rev lst acc-rev)
+    (for/fold ([acc acc-rev])
+              ([x (in-list lst)])
+      (cons x acc)))
+
   (define (maybe-postfix-sugar sym defined-lhs)
     (if (memq sym defined-lhs)
         #f
@@ -67,8 +72,9 @@
       [_ (error 'ext-parser (format "不支持的 EBNF 表达式：~s" expr))]))
 
   (define (collect-empty-terminals clauses)
-    (define token-groups
-      (for*/list ([c clauses]
+    (define empty-token-syms-rev
+      (for*/fold ([acc '()])
+                 ([c clauses]
                   [ids (in-value
                         (let ([parts (syntax->list c)])
                           (if (and parts
@@ -77,15 +83,13 @@
                               (cdr parts)
                               '())))]
                   [id ids])
-        id))
-    (define empty-token-syms '())
-    (for ([tg token-groups])
-      (define v (syntax-local-value tg (lambda () #f)))
-      (when (e-terminals-def? v)
-        (set! empty-token-syms
-              (append empty-token-syms
-                      (map syntax-e (syntax->list (e-terminals-def-t v)))))))
-    empty-token-syms)
+        (define v (syntax-local-value id (lambda () #f)))
+        (if (e-terminals-def? v)
+            (for/fold ([acc acc])
+                      ([tok (in-list (syntax->list (e-terminals-def-t v)))])
+              (cons (syntax-e tok) acc))
+            acc)))
+    (reverse empty-token-syms-rev))
 
   (define (accessible-indexes rhs empty-token-syms)
     (for/list ([sym rhs] [i (in-naturals 1)]
@@ -101,45 +105,43 @@
   (define (default-action rhs empty-token-syms)
     (pick-action-from-indexes (accessible-indexes rhs empty-token-syms)))
 
+  (define (step-action idxs)
+    (cond
+      [(and (member 1 idxs) (member 2 idxs)) '(cons $1 $2)]
+      [(member 1 idxs) '(list $1)]
+      [(member 2 idxs) '$2]
+      [else '(quote ())]))
+
   (define (action-for tag rhs empty-token-syms)
     (define idxs (accessible-indexes rhs empty-token-syms))
     (match tag
       ['opt-empty '(quote ())]
       ['opt-some (if (null? idxs) #f (d$ (car idxs)))]
       ['rep0-empty '(quote ())]
-      ['rep0-step
-       (cond
-         [(and (member 1 idxs) (member 2 idxs)) '(cons $1 $2)]
-         [(member 1 idxs) '(list $1)]
-         [(member 2 idxs) '$2]
-         [else '(quote ())])]
-      ['rep1-step
-       (cond
-         [(and (member 1 idxs) (member 2 idxs)) '(cons $1 $2)]
-         [(member 1 idxs) '(list $1)]
-         [(member 2 idxs) '$2]
-         [else '(quote ())])]
-      ['eps '(quote ())]
+      ['rep0-step (step-action idxs)]
+      ['rep1-step (step-action idxs)]
       [_ (pick-action-from-indexes idxs)]))
 
   (define (triples->grammar-rules triples empty-token-syms)
-    (define order '())
-    (define tbl (make-hash)) ; lhs -> (listof (list rhs action))
+    (define order-rev '())
+    (define rules-by-lhs (make-hash)) ; lhs -> reversed (listof (list rhs action))
+    (define seen-by-lhs (make-hash)) ; lhs -> candidate-set
     (for ([t triples])
       (match-define (list lhs rhs tag) t)
       (define action (action-for tag rhs empty-token-syms))
-      (unless (hash-has-key? tbl lhs)
-        (set! order (append order (list lhs))))
-      (hash-update! tbl lhs
-                    (lambda (old)
-                      (define candidate (list rhs action))
-                      (if (member candidate old equal?)
-                          old
-                          (append old (list candidate))))
-                    '()))
-    (for/list ([lhs order])
+      (unless (hash-has-key? rules-by-lhs lhs)
+        (set! order-rev (cons lhs order-rev))
+        (hash-set! rules-by-lhs lhs '())
+        (hash-set! seen-by-lhs lhs (make-hash)))
+      (define candidate (list rhs action))
+      (define seen (hash-ref seen-by-lhs lhs))
+      (unless (hash-has-key? seen candidate)
+        (hash-set! seen candidate #t)
+        (hash-update! rules-by-lhs lhs
+                      (lambda (old) (cons candidate old)))))
+    (for/list ([lhs (reverse order-rev)])
       `(,lhs
-        ,@(for/list ([ra (hash-ref tbl lhs)])
+        ,@(for/list ([ra (reverse (hash-ref rules-by-lhs lhs))])
             (match-define (list rhs action) ra)
             `(,(if (null? rhs) '() rhs) ,action)))))
 
@@ -159,7 +161,7 @@
 
   (define (transform-grammar-datum rules-datum empty-token-syms)
     (define defined-lhs (collect-defined-lhs rules-datum))
-    (define helper-triples '())
+    (define helper-triples-rev '())
     (define main-rules
       (for/list ([r rules-datum])
         (match r
@@ -167,13 +169,15 @@
            (define new-prods
              (for/list ([p prod])
                (define-values (rhs-items tail) (normalize-production p))
-               (define roots '())
-               (define extras '())
-               (for ([item rhs-items])
-                 (define-values (root rs) (lower item defined-lhs))
-                 (set! roots (append roots (list root)))
-                 (set! extras (append extras rs)))
-               (set! helper-triples (append helper-triples extras))
+               (define-values (roots-rev extras-rev)
+                 (for/fold ([roots-rev '()]
+                            [extras-rev '()])
+                          ([item rhs-items])
+                   (define-values (root rs) (lower item defined-lhs))
+                   (values (cons root roots-rev)
+                           (push-list-rev rs extras-rev))))
+               (define roots (reverse roots-rev))
+               (set! helper-triples-rev (append extras-rev helper-triples-rev))
                (define final-tail
                  (if (null? tail)
                      (list (default-action roots empty-token-syms))
@@ -184,7 +188,7 @@
                     (format "grammar 规则必须是 [lhs production ...]，实际: ~s" r))])))
     `(grammar
       ,@main-rules
-      ,@(triples->grammar-rules helper-triples empty-token-syms)))
+      ,@(triples->grammar-rules (reverse helper-triples-rev) empty-token-syms)))
 
   (define (transform-clause c empty-token-syms)
     (define parts (syntax->list c))
