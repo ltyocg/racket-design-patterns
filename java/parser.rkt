@@ -1,12 +1,14 @@
 #lang racket/base
 (require parser-tools/lex
-         parser-tools/yacc
-         (prefix-in : parser-tools/lex-sre)
          "lexer.rkt"
-         "ext-parser.rkt")
-(struct ast-compilation-unit (package-declaration import-declarations type-declarations) #:transparent)
-(struct ast-modular-compulation-unit (import-declarations module-declaration) #:transparent)
-(struct ast-package-declaration (annotations qualified-name) #:transparent)
+         "ext-parser.rkt"
+         "ast.rkt")
+
+(struct ast-packageDeclaration (annotations name) #:transparent)
+(struct ast-importDeclaration (name static asterisk module) #:transparent)
+(struct ast-typeDeclaration (annotations name modifiers members) #:transparent)
+(struct ast-classOrInterfaceDeclaration (interface compact typeParameters extendedTypes implementedTypes permittedTypes) #:transparent)
+
 (module+ test
   (require racket/pretty)
   (pretty-display
@@ -23,7 +25,7 @@
         [tokens empty-tokens tokens]
         [grammar
          [compilationUnit
-          [(packageDeclaration? compilationUnit.importDeclaration* compilationUnit.typeDeclaration*) (ast-compilation-unit $1 $2 $3)]
+          [(packageDeclaration? compilationUnit.importDeclaration* compilationUnit.typeDeclaration*) (CompilationUnit $1 $2 $3 null)]
           [(modularCompulationUnit) $1]]
          [compilationUnit.importDeclaration
           [(importDeclaration) $1]
@@ -32,15 +34,46 @@
           [(typeDeclaration) $1]
           [(SEMI) '()]]
          [modularCompulationUnit
-          [(importDeclaration* moduleDeclaration) (ast-modular-compulation-unit $1 $2)]]
+          [(importDeclaration* moduleDeclaration) (ast-compilationUnit null $1 null $2)]]
          [packageDeclaration
-          [(annotation* PACKAGE qualifiedName SEMI) (ast-package-declaration $1 $3)]]
+          [(annotation* PACKAGE qualifiedName SEMI) (ast-packageDeclaration $1 $3)]]
          [importDeclaration
-          [(IMPORT importDeclaration.STATIC? importDeclaration.qualifiedName SEMI)]]
-         [importDeclaration.STATIC?
+          [(IMPORT importDeclaration.static? qualifiedName importDeclaration.asterisk? SEMI) (ast-importDeclaration $3 $2 $4 #f)]]
+         [importDeclaration.static?
           [() #f]
           [(STATIC) #t]]
-         [importDeclaration.qualifiedName
-          [(qualifiedName) $1]
-          [(qualifiedName DOT MUL) (cons $1 "*")]]
+         [importDeclaration.asterisk?
+          [() #f]
+          [(DOT MUL) #t]]
+         [typeDeclaration
+          [(classOrInterfaceModifier* typeDeclaration.declaration) (ast-typeDeclaration)]]
+         [typeDeclaration.declaration
+          [(classDeclaration)]
+          [(enumDeclaration)]
+          [(interfaceDeclaration)]
+          [(annotationTypeDeclaration)]
+          [(recordDeclaration)]]
+         [modifier
+          [(classOrInterfaceModifier) $1]
+          [(NATIVE) 'native]
+          [(SYNCHRONIZED) 'synchronized]
+          [(TRANSIENT) 'transient]
+          [(VOLATILE) 'volatile]]
+         [classOrInterfaceModifier
+          [(annotation) $1]
+          [(PUBLIC) 'public]
+          [(PROTECTED) 'protected]
+          [(PRIVATE) 'private]
+          [(STATIC) 'static]
+          [(ABSTRACT) 'abstract]
+          [(FINAL) 'final]
+          [(STRICTFP) 'strictfp]
+          [(SEALED) 'sealed]
+          [(NON_SEALED) 'non-sealed]]
+         [variableModifier
+          [(FINAL) 'final]
+          [(annotation) $1]]
+         [classDeclaration
+          [(CLASS identifier typeParameters? classDeclaration.extends? classDeclaration.implements? classDeclaration.permits? classBody)
+           (ast-classOrInterfaceDeclaration #f #f $3 $4 $5 $6)]]
          ])))))

@@ -394,4 +394,4 @@
 (module+ test
   (require racket/pretty)
   (define-runtime-path example-dir "./example")
-  (pretty-print (tokenize-java (build-path example-dir "AllInOne17.java"))))
+  (pretty-print (tokenize-java (build-path example-dir "Simple.java"))))
