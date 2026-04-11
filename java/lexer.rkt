@@ -163,7 +163,7 @@
        (:/ #\A #\F)))
 (define-lex-abbrev Digits
   (:: (:/ #\0 #\9)
-      (:? (:: (:or (:/ #\0 #\9) #\_)
+      (:? (:: (:* (:or (:/ #\0 #\9) #\_))
               (:/ #\0 #\9)))))
 (define-lex-abbrev LetterOrDigit
   (:or Letter
@@ -248,7 +248,7 @@
                  (:or (:? Digits)
                       (:: (:+ #\_) Digits))))
         (:? (char-set "lL")))
-    (token-DECIMAL_LITERAL (string->number lexeme))]
+    (token-DECIMAL_LITERAL lexeme)]
    [(:: #\0
         (char-set "xX")
         (:or (:/ #\0 #\9)

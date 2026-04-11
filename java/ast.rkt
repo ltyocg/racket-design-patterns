@@ -1,8 +1,9 @@
 #lang racket/base
-(require racket/class)
-(define Node
-  (class object%))
-(define CompilationUnit
-  (class Node
-    (init-field package-declaration imports types module)))
-(provide all-defined-out)
+(struct ast-integer-literal (value) #:transparent)
+(struct ast-float-literal (value) #:transparent)
+(struct ast-char-literal (value) #:transparent)
+(struct ast-string-literal (value) #:transparent)
+(struct ast-bool-literal (value) #:transparent)
+(struct ast-null-literal (value) #:transparent)
+(struct ast-text-block (value) #:transparent)
+(provide (all-defined-out))

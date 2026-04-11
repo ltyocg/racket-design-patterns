@@ -6,4 +6,5 @@ package abc;
 class Test {
     String str = "hello";
     int number = 3;
+    float f = 0.33;
 }
