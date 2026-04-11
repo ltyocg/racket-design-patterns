@@ -144,9 +144,9 @@
            (char-set "bstnfr\"'\\"))
        (:: #\\
            (:? "u005c")
-           (:? (:: (:? (char-range #\0 #\3))
-                   (char-range #\0 #\7)))
-           (char-range #\0 #\7))
+           (:? (:: (:? (:/ #\0 #\3))
+                   (:/ #\0 #\7)))
+           (:/ #\0 #\7))
        (:: #\\
            (:+ #\u)
            HexDigit
@@ -158,21 +158,21 @@
       (:? (:: (:* (:or HexDigit #\_))
               HexDigit))))
 (define-lex-abbrev HexDigit
-  (:or (char-range #\0 #\9)
-       (char-range #\a #\f)
-       (char-range #\A #\F)))
+  (:or (:/ #\0 #\9)
+       (:/ #\a #\f)
+       (:/ #\A #\F)))
 (define-lex-abbrev Digits
-  (:: (char-range #\0 #\9)
-      (:? (:: (:or (char-range #\0 #\9) #\_)
-              (char-range #\0 #\9)))))
+  (:: (:/ #\0 #\9)
+      (:? (:: (:or (:/ #\0 #\9) #\_)
+              (:/ #\0 #\9)))))
 (define-lex-abbrev LetterOrDigit
   (:or Letter
-       (char-range #\0 #\9)))
+       (:/ #\0 #\9)))
 (define-lex-abbrev Letter
-  (:or (char-range #\a #\z)
-       (char-range #\A #\Z)
+  (:or (:/ #\a #\z)
+       (:/ #\A #\Z)
        (char-set "$_")
-       (char-complement (char-range #\u0000 #\u007F))))
+       (char-complement (:/ #\u0000 #\u007F))))
 
 (define java-lexer
   (lexer-src-pos
@@ -244,31 +244,31 @@
    ["with" (token-WITH)]
    ["yield" (token-YIELD)]
    [(:: (:or #\0
-             (:: (char-range #\1 #\9)
+             (:: (:/ #\1 #\9)
                  (:or (:? Digits)
                       (:: (:+ #\_) Digits))))
         (:? (char-set "lL")))
     (token-DECIMAL_LITERAL (string->number lexeme))]
    [(:: #\0
         (char-set "xX")
-        (:or (char-range #\0 #\9)
-             (char-range #\a #\f)
-             (char-range #\A #\F))
-        (:? (:: (:* (:or (char-range #\0 #\9)
-                         (char-range #\a #\f)
-                         (char-range #\A #\F)
+        (:or (:/ #\0 #\9)
+             (:/ #\a #\f)
+             (:/ #\A #\F))
+        (:? (:: (:* (:or (:/ #\0 #\9)
+                         (:/ #\a #\f)
+                         (:/ #\A #\F)
                          #\_))
-                (:or (char-range #\0 #\9)
-                     (char-range #\a #\f)
-                     (char-range #\A #\F))))
+                (:or (:/ #\0 #\9)
+                     (:/ #\a #\f)
+                     (:/ #\A #\F))))
         (:? (char-set "lL")))
     (token-HEX_LITERAL lexeme)]
    [(:: #\0
         (:* #\_)
-        (char-range #\0 #\7)
-        (:? (:: (:* (:or (char-range #\0 #\7)
+        (:/ #\0 #\7)
+        (:? (:: (:* (:or (:/ #\0 #\7)
                          #\_))
-                (:or (char-range #\0 #\7))))
+                (:or (:/ #\0 #\7))))
         (:? (char-set "lL"))) 
     (token-OCT_LITERAL lexeme)]
    [(:: #\0
