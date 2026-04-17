@@ -15,6 +15,8 @@
    [src-pos]
    [tokens empty-tokens tokens]
    [grammar
+    [variableDeclaratorId ;257
+     [(identifier variableDeclaratorId.2) ]]
     [packageName ;276
      [(identifier packageName.2*) (cons $1 $2)]]
     [packageName.2
@@ -61,7 +63,7 @@
      [(PERMITS) "permits"]
      [(RECORD) "record"]
      [(VAR) "var"]]
-    [primary ;710
+    [primary ;710*
      [(THIS) 'this]
      [(SUPER) 'super]
      [(literal) $1]

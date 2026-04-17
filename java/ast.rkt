@@ -1,4 +1,5 @@
 #lang racket/base
+(struct ast-array-type () #:transparent)
 (struct ast-integer-literal (value) #:transparent)
 (struct ast-float-literal (value) #:transparent)
 (struct ast-char-literal (value) #:transparent)
