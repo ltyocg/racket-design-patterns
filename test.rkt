@@ -1,4 +1,5 @@
 #lang s-exp syntax/module-reader
-[grammar
- (~begin compilationUnit
-  )]
+(define-grammar-operator (* s)
+  [_
+   [() '()]
+   [(s _) (cons $1 $2)]])
