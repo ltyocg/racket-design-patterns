@@ -12,20 +12,19 @@
               ([x (in-list lst)])
       (cons x acc)))
 
-  (define (maybe-postfix-sugar sym defined-lhs)
-    (if (memq sym defined-lhs)
-        #f
-        (let* ([str (symbol->string sym)]
-               [n (string-length str)]
-               [last (and (> n 1) (string-ref str (sub1 n)))])
-          (cond
-            [(eqv? last #\?)
-             `(opt ,(string->symbol (substring str 0 (sub1 n))))]
-            [(eqv? last #\*)
-             `(rep0 ,(string->symbol (substring str 0 (sub1 n))))]
-            [(eqv? last #\+)
-             `(rep1 ,(string->symbol (substring str 0 (sub1 n))))]
-            [else #f]))))
+  (define current-helper-counter (make-parameter 0))
+  (define current-helper-table (make-parameter (make-hash)))
+  (define (helper-nt-name key defined-lhs)
+    (define tbl (current-helper-table))
+    (hash-ref! tbl key
+               (lambda ()
+                 (let loop ()
+                   (define candidate
+                     (string->symbol (format "__ext_~a" (current-helper-counter))))
+                   (current-helper-counter (add1 (current-helper-counter)))
+                   (if (memq candidate defined-lhs)
+                       (loop)
+                       candidate)))))
 
   (define (datum->syntax/stx stx v)
     (datum->syntax stx v stx stx))
@@ -33,40 +32,30 @@
   ;; triple = (list lhs rhs action)
   (define (lower expr defined-lhs stx)
     (match expr
+      [(list (== '?) inner)
+       (define-values (r rs) (lower inner defined-lhs stx))
+       (define nt (helper-nt-name (cons '? r) defined-lhs))
+       (values nt
+               (append rs
+                       (list (list nt '() '(quote ()))
+                             (list nt (list r) '$1))))]
+      [(list (== '*) inner)
+       (define-values (r rs) (lower inner defined-lhs stx))
+       (define nt (helper-nt-name (cons '* r) defined-lhs))
+       (values nt
+               (append rs
+                       (list (list nt '() '(quote ()))
+                             (list nt (list r nt) '(cons $1 $2)))))]
+      [(list (== '+) inner)
+       (define-values (r rs) (lower inner defined-lhs stx))
+       (define nt+ (helper-nt-name (cons '+ r) defined-lhs))
+       (define nt* (helper-nt-name (cons '* r) defined-lhs))
+       (values nt+ (append rs
+                           (list (list nt* '() '(quote ()))
+                                 (list nt* (list r nt*) '(cons $1 $2))
+                                 (list nt+ (list r nt*) '(cons $1 $2)))))]
       [(? symbol?)
-       (define sugared (maybe-postfix-sugar expr defined-lhs))
-       (cond
-         [(not sugared)
-          (values expr '())]
-         [else
-          (match sugared
-            [(list 'opt inner)
-             (define-values (r rs) (lower inner defined-lhs stx))
-             (define nt expr)
-             (values nt
-                     (append rs
-                             (list (list nt '() '(quote ()))
-                                   (list nt (list r) '$1))))]
-            [(list 'rep0 inner)
-             (define-values (r rs) (lower inner defined-lhs stx))
-             (define nt expr)
-             (values nt
-                     (append rs
-                             (list (list nt '() '(quote ()))
-                                   (list nt (list r nt) '(cons $1 $2)))))]
-            [(list 'rep1 inner)
-             (define-values (r rs) (lower inner defined-lhs stx))
-             (define nt+ expr)
-             (define nt* (string->symbol
-                          (string-append (symbol->string inner) "*")))
-             (define user-defined-nt*? (memq nt* defined-lhs))
-             (define generated
-               (if user-defined-nt*?
-                   (list (list nt+ (list r nt*) '(cons $1 $2)))
-                   (list (list nt* '() '(quote ()))
-                         (list nt* (list r nt*) '(cons $1 $2))
-                         (list nt+ (list r nt*) '(cons $1 $2)))))
-             (values nt+ (append rs generated))])])]
+       (values expr '())]
       [_ (raise-syntax-error 'ext-parser
                              (format "不支持的 EBNF 表达式：~s" expr)
                              stx)]))
@@ -110,6 +99,8 @@
                             stx)))
 
   (define (transform-grammar-datum rules-stx rule-stxs)
+    (parameterize ([current-helper-counter 0]
+                   [current-helper-table (make-hash)])
     (define rules-datum (map syntax->datum rules-stx))
     (define defined-lhs (collect-defined-lhs rules-datum))
     (define helper-triples-rev '())
@@ -143,7 +134,7 @@
     (datum->syntax/stx (car rules-stx)
      `(grammar
        ,@main-rules
-       ,@(triples->grammar-rules (reverse helper-triples-rev) (car rules-stx)))))
+       ,@(triples->grammar-rules (reverse helper-triples-rev) (car rules-stx))))))
 
   (define (transform-clause c)
     (define parts (syntax->list c))
@@ -184,9 +175,9 @@
         [grammar
          [expr
           [(term) $1]
-          [(NUM?) $1]]
+          [((? NUM)) $1]]
          [term
-          [(NUM? LPAREN* RPAREN+) (list $1 $2 $3)]]]))))
+          [((? NUM) (* LPAREN) (+ RPAREN)) (list $1 $2 $3)]]]))))
   (pretty-display
    (syntax->datum
     (expand-once
@@ -197,7 +188,16 @@
         [tokens value-tokens op-tokens]
         [grammar
          [expr
-          [(NUM+) $1]]
-         [NUM*
-          [() 'user-empty]
-          [(NUM NUM*) (cons $1 $2)]]])))))
+          [((+ NUM)) $1]]]))))
+  (pretty-display
+   (syntax->datum
+    (expand-once
+     #'(ext-parser
+        [start expr]
+        [end EOF]
+        [error (lambda args (error 'my-parser (format "parse error: ~s" args)))]
+        [src-pos]
+        [tokens value-tokens op-tokens]
+        [grammar
+         [expr
+          [((? (* NUM))) $1]]])))))

@@ -16,28 +16,28 @@
    [tokens empty-tokens tokens]
    [grammar
     [compilationUnit
-     [(packageDeclaration? compilationUnit.2* compilationUnit.3*) todo]
+     [((? packageDeclaration) (* compilationUnit.2) (* compilationUnit.3)) todo]
      [(modularCompulationUnit) todo]]
     [compilationUnit.2
-     [(importDeclaration) todo] 
+     [(importDeclaration) todo]
      [(SEMI) '()]]
     [compilationUnit.3
      [(typeDeclaration) todo]
      [(SEMI) '()]]
     [modularCompulationUnit
-     [(importDeclaration* moduleDeclaration) todo]]
+     [((* importDeclaration) moduleDeclaration) todo]]
     [packageDeclaration
-     [(annotation* PACKAGE qualifiedName SEMI) todo]]
+     [((* annotation) PACKAGE qualifiedName SEMI) todo]]
     [importDeclaration
-     [(IMPORT importDeclaration.2? qualifiedName importDeclaration.4? SEMI) todo]]
+     [(IMPORT (? importDeclaration.2) qualifiedName importDeclaration.4 SEMI) todo]]
     [importDeclaration.2
      [(STATIC) #t]
      [() #f]]
-    [importDeclaration.4?
+    [importDeclaration.4
      [(DOT MUL) #t]
      [() #f]]
     [typeDeclaration
-     [(classOrInterfaceModifier* typeDeclaration.2) todo]]
+     [((* classOrInterfaceModifier) typeDeclaration.2) todo]]
     [typeDeclaration.2
      [(classDeclaration) todo]
      [(enumDeclaration) todo]
@@ -65,7 +65,7 @@
      [(FINAL) 'final]
      [(annotation) todo]]
     [classDeclaration
-     [(CLASS identifier typeParameters? classDeclaration.4? classDeclaration.5? classDeclaration.6? classBody) todo]]
+     [(CLASS identifier (? typeParameters) (? classDeclaration.4) (? classDeclaration.5) (? classDeclaration.6) classBody) todo]]
     [classDeclaration.4
      [(EXTENDS typeType) todo]]
     [classDeclaration.5
@@ -73,34 +73,34 @@
     [classDeclaration.6
      [(PERMITS typeList) todo]]
     [typeParameters
-     [(LT typeParameter typeParameters.3* GT) todo]]
+     [(LT typeParameter (* typeParameters.3) GT) todo]]
     [typeParameters.3
      [(COMMA typeParameter) todo]]
     [typeParameter
-     [(annotation* identifier typeParameter.3?) todo]]
+     [((* annotation) identifier (? typeParameter.3)) todo]]
     [typeParameter.3
-     [(EXTENDS annotation* typeBound) todo]]
+     [(EXTENDS (* annotation) typeBound) todo]]
     [typeBound
-     [(typeType typeBound.2*) todo]]
+     [(typeType (* typeBound.2)) todo]]
     [typeBound.2
      [(BITAND typeType) todo]]
     [enumDeclaration
-     [(ENUM identifier enumDeclaration.3? LBRACE enumConstants? enumDeclaration.6? enumBodyDeclarations? RBRACE) todo]]
+     [(ENUM identifier (? enumDeclaration.3) LBRACE (? enumConstants) (? enumDeclaration.6) (? enumBodyDeclarations) RBRACE) todo]]
     ;----
     [variableDeclaratorId ;257
-     [(identifier variableDeclaratorId.2*) todo]]
+     [(identifier (* variableDeclaratorId.2)) todo]]
     [variableDeclaratorId.2
      [(LBRACK RBRACK) todo]]
     [packageName ;276
-     [(identifier packageName.2*) (cons $1 $2)]]
+     [(identifier (* packageName.2)) (cons $1 $2)]]
     [packageName.2
      [(DOT identifier) $2]]
     [qualifiedNameList ;285
-     [(qualifiedName qualifiedNameList.2*) (cons $1 $2)]]
+     [(qualifiedName (* qualifiedNameList.2)) (cons $1 $2)]]
     [qualifiedNameList.2
      [(COMMA qualifiedName) $2]]
     [qualifiedName ;316
-     [(identifier qualifiedName.2*) (cons $1 $2)]]
+     [(identifier (* qualifiedName.2)) (cons $1 $2)]]
     [qualifiedName.2
      [(DOT identifier) $2]]
     [literal
