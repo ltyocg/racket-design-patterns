@@ -34,27 +34,34 @@
   (struct production-defn (rhs-items action) #:transparent)
   (struct symbol-fn-defn (param productions) #:transparent)
 
-  (define grammar-operator-table (make-hash))
+  (struct grammar-operator-info (defn) #:transparent)
 
-  (define (register-grammar-operator! op defn)
-    (hash-set! grammar-operator-table op defn))
+  (define grammar-op-prefix "op:")
 
-  (define (lookup-grammar-operator op)
-    (hash-ref grammar-operator-table op #f))
+  (define (grammar-op-id op-stx)
+    (datum->syntax op-stx
+                   (string->symbol (format "~a~a" grammar-op-prefix (syntax-e op-stx)))))
 
   ;; --- Grammar transformation ---
 
   ;; triple = (list lhs rhs action)
-  (define (lower expr defined-lhs stx)
+  ;; expr-stx is a syntax object; when it's a list starting with an identifier,
+  ;; we look it up via syntax-local-value for lexical scoping.
+  (define (lower expr-stx defined-lhs)
+    (define expr (syntax->datum expr-stx))
     (match expr
-      [(list (? symbol? op) inner)
-       (define defn (lookup-grammar-operator op))
-       (unless defn
+      [(list (? symbol? op-sym) _)
+       (define op-stx (car (syntax->list expr-stx)))
+       (define lookup-stx (grammar-op-id op-stx))
+       (define info (syntax-local-value lookup-stx (lambda () #f)))
+       (unless (grammar-operator-info? info)
          (raise-syntax-error 'ext-parser
-                             (format "未知的文法算子：~a" op)
-                             stx))
-       (define-values (r rs) (lower inner defined-lhs stx))
-       (define nt (helper-nt-name (cons op r) defined-lhs))
+                             (format "未知的文法算子：~a" op-sym)
+                             expr-stx))
+       (define defn (grammar-operator-info-defn info))
+       (define inner-stx (cadr (syntax->list expr-stx)))
+       (define-values (r rs) (lower inner-stx defined-lhs))
+       (define nt (helper-nt-name (cons op-sym r) defined-lhs))
        (define new-triples
          (for/list ([p (symbol-fn-defn-productions defn)])
            (define resolved-rhs
@@ -68,7 +75,7 @@
        (values expr '())]
       [_ (raise-syntax-error 'ext-parser
                              (format "不支持的 EBNF 表达式：~s" expr)
-                             stx)]))
+                             expr-stx)]))
 
   (define (triples->grammar-rules triples loc-stx)
     (define order-rev '())
@@ -126,8 +133,8 @@
                  (define-values (roots-rev extras-rev)
                    (for/fold ([roots-rev '()]
                               [extras-rev '()])
-                             ([item rhs-items] [istx (in-list rhs-stxs)])
-                     (define-values (root rs) (lower item defined-lhs istx))
+                             ([_ rhs-items] [istx (in-list rhs-stxs)])
+                     (define-values (root rs) (lower istx defined-lhs))
                      (values (cons root roots-rev)
                              (push-list-rev rs extras-rev))))
                  (define roots (reverse roots-rev))
@@ -163,7 +170,6 @@
 (define-syntax (define-grammar-operator stx)
   (syntax-parse stx
     [(_ (op:id param:id) [(~datum _) [rhs action] ...])
-     (define op-sym (syntax-e #'op))
      (define param-sym (syntax-e #'param))
      (define rhs-stxs (syntax->list #'(rhs ...)))
      (define act-stxs (syntax->list #'(action ...)))
@@ -171,13 +177,8 @@
        (for/list ([rhs-stx rhs-stxs] [act-stx act-stxs])
          (list (map syntax-e (syntax->list rhs-stx))
                (syntax->datum act-stx))))
-     (when (lookup-grammar-operator op-sym)
-       (raise-syntax-error 'define-grammar-operator
-                           (format "文法算子 ~a 已定义" op-sym)
-                           stx))
-     #`(begin-for-syntax
-         (register-grammar-operator!
-          '#,op-sym
+     #`(define-syntax #,(grammar-op-id #'op)
+         (grammar-operator-info
           (symbol-fn-defn '#,param-sym
                           (list #,@(for/list ([p prods])
                                      #`(production-defn '#,(car p) '#,(cadr p)))))))]))
@@ -209,6 +210,7 @@
     [_
      [(s) (cons $1 '())]
      [(s _) (cons $1 $2)]])
+  (pretty-display (+ 1 2))
   (pretty-display
    (syntax->datum
     (expand-once
