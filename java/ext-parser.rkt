@@ -28,7 +28,7 @@
             [else #f]))))
 
   ;; triple = (list lhs rhs action)
-  (define (lower expr defined-lhs)
+  (define (lower expr defined-lhs stx)
     (match expr
       [(? symbol?)
        (define sugared (maybe-postfix-sugar expr defined-lhs))
@@ -38,21 +38,21 @@
          [else
           (match sugared
             [(list 'opt inner)
-             (define-values (r rs) (lower inner defined-lhs))
+             (define-values (r rs) (lower inner defined-lhs stx))
              (define nt expr)
              (values nt
                      (append rs
                              (list (list nt '() '(quote ()))
                                    (list nt (list r) '$1))))]
             [(list 'rep0 inner)
-             (define-values (r rs) (lower inner defined-lhs))
+             (define-values (r rs) (lower inner defined-lhs stx))
              (define nt expr)
              (values nt
                      (append rs
                              (list (list nt '() '(quote ()))
                                    (list nt (list r nt) '(cons $1 $2)))))]
             [(list 'rep1 inner)
-             (define-values (r rs) (lower inner defined-lhs))
+             (define-values (r rs) (lower inner defined-lhs stx))
              (define nt+ expr)
              (define nt* (string->symbol
                           (string-append (symbol->string inner) "*")))
@@ -64,7 +64,9 @@
                          (list nt* (list r nt*) '(cons $1 $2))
                          (list nt+ (list r nt*) '(cons $1 $2)))))
              (values nt+ (append rs generated))])])]
-      [_ (error 'ext-parser (format "不支持的 EBNF 表达式：~s" expr))]))
+      [_ (raise-syntax-error 'ext-parser
+                             (format "不支持的 EBNF 表达式：~s" expr)
+                             stx)]))
 
   (define (triples->grammar-rules triples)
     (define order-rev '())
@@ -96,38 +98,44 @@
          [_ (error 'ext-parser
                    (format "grammar 规则必须是 [lhs production ...]，实际: ~s" r))]))))
 
-  (define (normalize-production prod)
+  (define (normalize-production prod stx)
     (if (and (list? prod) (pair? prod) (list? (car prod)))
         (values (car prod) (cdr prod))
-        (error 'ext-parser
-               (format "production 必须是 [(rhs-item ...) action ...]，实际: ~s" prod))))
+        (raise-syntax-error 'ext-parser
+                            (format "production 必须是 [(rhs-item ...) action ...]，实际: ~s" prod)
+                            stx)))
 
-  (define (transform-grammar-datum rules-datum)
+  (define (transform-grammar-datum rules-stx rule-stxs)
+    (define rules-datum (map syntax->datum rules-stx))
     (define defined-lhs (collect-defined-lhs rules-datum))
     (define helper-triples-rev '())
     (define main-rules
-      (for/list ([r rules-datum])
+      (for/list ([r rules-datum] [rstx rule-stxs])
         (match r
-          [(list lhs prod ...)
+          [(list lhs prod ...) 
+           (define prod-stxs (cdr (syntax->list rstx)))
            (define new-prods
-             (for/list ([p prod])
-               (define-values (rhs-items tail) (normalize-production p))
+             (for/list ([p prod] [pstx prod-stxs])
+               (define-values (rhs-items tail) (normalize-production p pstx))
+               (define rhs-stxs (syntax->list (car (syntax->list pstx))))
                (define-values (roots-rev extras-rev)
                  (for/fold ([roots-rev '()]
                             [extras-rev '()])
-                           ([item rhs-items])
-                   (define-values (root rs) (lower item defined-lhs))
+                           ([item rhs-items] [istx (in-list rhs-stxs)])
+                   (define-values (root rs) (lower item defined-lhs istx))
                    (values (cons root roots-rev)
                            (push-list-rev rs extras-rev))))
                (define roots (reverse roots-rev))
                (set! helper-triples-rev (append extras-rev helper-triples-rev))
                (when (null? tail)
-                 (error 'ext-parser
-                        (format "产生式必须提供动作：~s" p)))
+                 (raise-syntax-error 'ext-parser
+                                     (format "产生式必须提供动作：~s" p)
+                                     pstx))
                `(,roots ,@tail)))
            `(,lhs ,@new-prods)]
-          [_ (error 'ext-parser
-                    (format "grammar 规则必须是 [lhs production ...]，实际: ~s" r))])))
+          [_ (raise-syntax-error 'ext-parser
+                                 (format "grammar 规则必须是 [lhs production ...]，实际: ~s" r)
+                                 rstx)])))
     `(grammar
       ,@main-rules
       ,@(triples->grammar-rules (reverse helper-triples-rev))))
@@ -139,7 +147,8 @@
              (eq? (syntax-e (car parts)) 'grammar))
         (datum->syntax c
                        (transform-grammar-datum
-                        (map syntax->datum (cdr parts)))
+                        (cdr parts)
+                        (cdr parts))
                        c c)
         c)))
 
