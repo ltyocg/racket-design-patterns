@@ -27,6 +27,9 @@
              `(rep1 ,(string->symbol (substring str 0 (sub1 n))))]
             [else #f]))))
 
+  (define (datum->syntax/stx stx v)
+    (datum->syntax stx v stx stx))
+
   ;; triple = (list lhs rhs action)
   (define (lower expr defined-lhs stx)
     (match expr
@@ -68,7 +71,7 @@
                              (format "不支持的 EBNF 表达式：~s" expr)
                              stx)]))
 
-  (define (triples->grammar-rules triples)
+  (define (triples->grammar-rules triples loc-stx)
     (define order-rev '())
     (define rules-by-lhs (make-hash))
     (define seen-by-lhs (make-hash))
@@ -85,10 +88,11 @@
         (hash-update! rules-by-lhs lhs
                       (lambda (old) (cons candidate old)))))
     (for/list ([lhs (reverse order-rev)])
-      `(,lhs
-        ,@(for/list ([ra (reverse (hash-ref rules-by-lhs lhs))])
-            (match-define (list rhs action) ra)
-            `(,(if (null? rhs) '() rhs) ,action)))))
+      (datum->syntax/stx loc-stx
+       `(,lhs
+         ,@(for/list ([ra (reverse (hash-ref rules-by-lhs lhs))])
+             (match-define (list rhs action) ra)
+             `(,(if (null? rhs) '() rhs) ,action))))))
 
   (define (collect-defined-lhs rules-datum)
     (remove-duplicates
@@ -112,7 +116,7 @@
     (define main-rules
       (for/list ([r rules-datum] [rstx rule-stxs])
         (match r
-          [(list lhs prod ...) 
+          [(list lhs prod ...)
            (define prod-stxs (cdr (syntax->list rstx)))
            (define new-prods
              (for/list ([p prod] [pstx prod-stxs])
@@ -131,14 +135,15 @@
                  (raise-syntax-error 'ext-parser
                                      (format "产生式必须提供动作：~s" p)
                                      pstx))
-               `(,roots ,@tail)))
-           `(,lhs ,@new-prods)]
+               (datum->syntax/stx pstx `(,roots ,@tail))))
+           (datum->syntax/stx rstx `(,lhs ,@new-prods))]
           [_ (raise-syntax-error 'ext-parser
                                  (format "grammar 规则必须是 [lhs production ...]，实际: ~s" r)
                                  rstx)])))
-    `(grammar
-      ,@main-rules
-      ,@(triples->grammar-rules (reverse helper-triples-rev))))
+    (datum->syntax/stx (car rules-stx)
+     `(grammar
+       ,@main-rules
+       ,@(triples->grammar-rules (reverse helper-triples-rev) (car rules-stx)))))
 
   (define (transform-clause c)
     (define parts (syntax->list c))

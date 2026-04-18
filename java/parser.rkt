@@ -3,10 +3,10 @@
          "lexer.rkt"
          "ext-parser.rkt"
          "ast.rkt")
-
+(define todo null)
 (define java-parser
   (ext-parser
-   [start packageName]
+   [start compilationUnit]
    [end EOF]
    [error (lambda (tok-ok? tok-name tok-value start end)
             (error 'java-parser "Parse error at line ~a, col ~a: ~a ~a"
@@ -15,8 +15,82 @@
    [src-pos]
    [tokens empty-tokens tokens]
    [grammar
+    [compilationUnit
+     [(packageDeclaration? compilationUnit.2* compilationUnit.3*) todo]
+     [(modularCompulationUnit) todo]]
+    [compilationUnit.2
+     [(importDeclaration) todo] 
+     [(SEMI) '()]]
+    [compilationUnit.3
+     [(typeDeclaration) todo]
+     [(SEMI) '()]]
+    [modularCompulationUnit
+     [(importDeclaration* moduleDeclaration) todo]]
+    [packageDeclaration
+     [(annotation* PACKAGE qualifiedName SEMI) todo]]
+    [importDeclaration
+     [(IMPORT importDeclaration.2? qualifiedName importDeclaration.4? SEMI) todo]]
+    [importDeclaration.2
+     [(STATIC) #t]
+     [() #f]]
+    [importDeclaration.4?
+     [(DOT MUL) #t]
+     [() #f]]
+    [typeDeclaration
+     [(classOrInterfaceModifier* typeDeclaration.2) todo]]
+    [typeDeclaration.2
+     [(classDeclaration) todo]
+     [(enumDeclaration) todo]
+     [(interfaceDeclaration) todo]
+     [(annotationTypeDeclaration) todo]
+     [(recordDeclaration) todo]]
+    [modifier
+     [(classOrInterfaceModifier) todo]
+     [(NATIVE) 'native]
+     [(SYNCHRONIZED) 'synchronized]
+     [(TRANSIENT) 'transient]
+     [(VOLATILE) 'volatile]]
+    [classOrInterfaceModifier
+     [(annotation) todo]
+     [(PUBLIC) 'public]
+     [(PROTECTED) 'protected]
+     [(PRIVATE) 'private]
+     [(STATIC) 'static]
+     [(ABSTRACT) 'abstract]
+     [(FINAL) 'final]
+     [(STRICTFP) 'strictfp]
+     [(SEALED) 'sealed]
+     [(NON_SEALED) 'non-sealed]]
+    [variableModifier
+     [(FINAL) 'final]
+     [(annotation) todo]]
+    [classDeclaration
+     [(CLASS identifier typeParameters? classDeclaration.4? classDeclaration.5? classDeclaration.6? classBody) todo]]
+    [classDeclaration.4
+     [(EXTENDS typeType) todo]]
+    [classDeclaration.5
+     [(IMPLEMENTS typeList) todo]]
+    [classDeclaration.6
+     [(PERMITS typeList) todo]]
+    [typeParameters
+     [(LT typeParameter typeParameters.3* GT) todo]]
+    [typeParameters.3
+     [(COMMA typeParameter) todo]]
+    [typeParameter
+     [(annotation* identifier typeParameter.3?) todo]]
+    [typeParameter.3
+     [(EXTENDS annotation* typeBound) todo]]
+    [typeBound
+     [(typeType typeBound.2*) todo]]
+    [typeBound.2
+     [(BITAND typeType) todo]]
+    [enumDeclaration
+     [(ENUM identifier enumDeclaration.3? LBRACE enumConstants? enumDeclaration.6? enumBodyDeclarations? RBRACE) todo]]
+    ;----
     [variableDeclaratorId ;257
-     [(identifier variableDeclaratorId.2) ]]
+     [(identifier variableDeclaratorId.2*) todo]]
+    [variableDeclaratorId.2
+     [(LBRACK RBRACK) todo]]
     [packageName ;276
      [(identifier packageName.2*) (cons $1 $2)]]
     [packageName.2
