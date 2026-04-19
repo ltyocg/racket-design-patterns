@@ -29,10 +29,21 @@
   (define (datum->syntax/stx stx v)
     (datum->syntax stx v stx stx))
 
+  (define (subst-symbols item param-map group-nt-map)
+    (cond
+      [(symbol? item)
+       (cond [(assq item param-map) => cdr]
+             [(assq item group-nt-map) => cdr]
+             [else item])]
+      [(list? item)
+       (map (lambda (x) (subst-symbols x param-map group-nt-map)) item)]
+      [else item]))
+
   ;; --- Grammar operator infrastructure ---
 
   (struct production-defn (rhs-items action) #:transparent)
-  (struct symbol-fn-defn (params productions) #:transparent)
+  (struct named-group (name productions) #:transparent)
+  (struct symbol-fn-defn (params groups) #:transparent)
 
   (struct grammar-operator-info (defn) #:transparent)
 
@@ -60,6 +71,8 @@
                              expr-stx))
        (define defn (grammar-operator-info-defn info))
        (define param-syms (symbol-fn-defn-params defn))
+       (define groups (symbol-fn-defn-groups defn))
+       (define group-names (map named-group-name groups))
        (define inner-stxs (cdr (syntax->list expr-stx)))
        (unless (= (length inner-stxs) (length param-syms))
          (raise-syntax-error 'ext-parser
@@ -73,16 +86,39 @@
            (values (cons r roots-rev) (push-list-rev rs extras-rev))))
        (define roots (reverse roots-rev))
        (define param-map (map cons param-syms roots))
-       (define nt (helper-nt-name (cons op-sym roots) defined-lhs))
+       (define group-nts
+         (for/list ([g groups])
+           (helper-nt-name (cons op-sym (cons (named-group-name g) roots))
+                           defined-lhs)))
+       (define group-nt-map (map cons group-names group-nts))
+       (define entry-nt (car group-nts))
        (define new-triples
-         (for/list ([p (symbol-fn-defn-productions defn)])
-           (define resolved-rhs
-             (for/list ([item (production-defn-rhs-items p)])
-               (cond [(assq item param-map) => cdr]
-                     [(eq? item '_) nt]
-                     [else item])))
-           (list nt resolved-rhs (production-defn-action p))))
-       (values nt (append (reverse extras-rev) new-triples))]
+         (for/fold ([acc '()])
+                   ([g groups] [nt group-nts])
+           (define prods (named-group-productions g))
+           (append acc
+                   (for/list ([p prods])
+                     (define resolved-rhs
+                       (for/list ([item (production-defn-rhs-items p)])
+                         (subst-symbols item param-map group-nt-map)))
+                     (list nt resolved-rhs (production-defn-action p))))))
+       ;; Now lower any nested operator calls in the resolved RHS items
+       (define all-triples (append (reverse extras-rev) new-triples))
+       (define final-triples
+         (for/fold ([acc '()])
+                   ([triple all-triples])
+           (match-define (list nt rhs action) triple)
+           (define-values (roots-rev extras-rev)
+             (for/fold ([roots-rev '()] [extras-rev '()])
+                       ([item rhs])
+               (if (list? item)
+                   (let-values ([(r rs) (lower (datum->syntax/stx expr-stx item) defined-lhs)])
+                     (values (cons r roots-rev) (push-list-rev rs extras-rev)))
+                   (values (cons item roots-rev) extras-rev))))
+           (define roots (reverse roots-rev))
+           (append (reverse extras-rev)
+                   (cons (list nt roots action) acc))))
+       (values entry-nt (reverse final-triples))]
       [(? symbol?)
        (values expr '())]
       [_ (raise-syntax-error 'ext-parser
@@ -179,19 +215,26 @@
 
 (define-syntax (define-grammar-operator stx)
   (syntax-parse stx
-    [(_ (op:id param:id ...) [(~datum _) [rhs action] ...])
+    [(_ (op:id param:id ...) [group-name:id [rhs action] ...] ...)
      (define param-syms (map syntax-e (syntax->list #'(param ...))))
-     (define rhs-stxs (syntax->list #'(rhs ...)))
-     (define act-stxs (syntax->list #'(action ...)))
-     (define prods
-       (for/list ([rhs-stx rhs-stxs] [act-stx act-stxs])
-         (list (map syntax-e (syntax->list rhs-stx))
-               (syntax->datum act-stx))))
+     (define group-names (map syntax-e (syntax->list #'(group-name ...))))
+     (define groups
+       (for/list ([gn group-names]
+                  [rhs-stxs (syntax->list #'((rhs ...) ...))]
+                  [act-stxs (syntax->list #'((action ...) ...))])
+         (define prods
+           (for/list ([rhs-stx (syntax->list rhs-stxs)]
+                      [act-stx (syntax->list act-stxs)])
+             (list (syntax->datum rhs-stx)
+                   (syntax->datum act-stx))))
+         (list gn prods)))
      #`(define-syntax #,(grammar-op-id #'op)
          (grammar-operator-info
           (symbol-fn-defn '#,param-syms
-                          (list #,@(for/list ([p prods])
-                                     #`(production-defn '#,(car p) '#,(cadr p)))))))]))
+                          (list #,@(for/list ([g groups])
+                                     #`(named-group '#,(car g)
+                                                     (list #,@(for/list ([p (cadr g)])
+                                                                #`(production-defn '#,(car p) '#,(cadr p))))))))))]))
 
 (define-syntax (ext-parser stx)
   (syntax-parse stx
@@ -209,22 +252,22 @@
   (define-tokens value-tokens (NUM))
   (define-empty-tokens op-tokens (PLUS LPAREN RPAREN EOF))
   (define-grammar-operator (? s)
-    [_
+    [_main
      [() '()]
      [(s) $1]])
   (define-grammar-operator (* s)
-    [_
+    [_main
      [() '()]
-     [(s _) (cons $1 $2)]])
+     [(s _main) (cons $1 $2)]])
   (define-grammar-operator (+ s)
-    [_
+    [main
      [(s) (cons $1 '())]
-     [(s _) (cons $1 $2)]])
-  ; (define-grammar-operator (join separator element)
-  ;   [key
-  ;    [(element (* rest)) (cons $1 $2)]]
-  ;   [rest
-  ;    [(separator element) $1]])
+     [(s main) (cons $1 $2)]])
+  (define-grammar-operator (join separator element)
+    [key
+     [(element (* rest)) (cons $1 $2)]]
+    [rest
+     [(separator element) $1]])
   (pretty-display (+ 1 2))
   (pretty-display
    (syntax->datum
