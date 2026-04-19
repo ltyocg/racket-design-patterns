@@ -263,11 +263,6 @@
     [main
      [(s) (cons $1 '())]
      [(s main) (cons $1 $2)]])
-  (define-grammar-operator (join separator element)
-    [key
-     [(element (* rest)) (cons $1 $2)]]
-    [rest
-     [(separator element) $1]])
   (pretty-display (+ 1 2))
   (pretty-display
    (syntax->datum

@@ -3,6 +3,23 @@
          "lexer.rkt"
          "ext-parser.rkt"
          "ast.rkt")
+(define-grammar-operator (? s)
+  [main
+   [() '()]
+   [(s) $1]])
+(define-grammar-operator (* s)
+  [main
+   [() '()]
+   [(s main) (cons $1 $2)]])
+(define-grammar-operator (+ s)
+  [main
+   [(s) (cons $1 '())]
+   [(s main) (cons $1 $2)]])
+(define-grammar-operator (sep-by separator element)
+  [main
+   [(element (* rest)) (cons $1 $2)]]
+  [rest
+   [(separator element) $1]])
 (define todo null)
 (define java-parser
   (ext-parser
@@ -73,19 +90,119 @@
     [classDeclaration.6
      [(PERMITS typeList) todo]]
     [typeParameters
-     [(LT typeParameter (* typeParameters.3) GT) todo]]
-    [typeParameters.3
-     [(COMMA typeParameter) todo]]
+     [(LT (sep-by COMMA typeParameter) GT) todo]]
     [typeParameter
      [((* annotation) identifier (? typeParameter.3)) todo]]
     [typeParameter.3
      [(EXTENDS (* annotation) typeBound) todo]]
     [typeBound
-     [(typeType (* typeBound.2)) todo]]
-    [typeBound.2
-     [(BITAND typeType) todo]]
+     [((sep-by BITAND typeType)) todo]]
     [enumDeclaration
      [(ENUM identifier (? enumDeclaration.3) LBRACE (? enumConstants) (? enumDeclaration.6) (? enumBodyDeclarations) RBRACE) todo]]
+    [enumConstants
+     [((sep-by COMMA enumConstant)) todo]]
+    [enumConstant
+     [((* annotation) identifier (? arguments) (? classBody)) todo]]
+    [enumBodyDeclarations
+     [(SEMI (* classBodyDeclaration)) todo]]
+    [interfaceDeclaration
+     [(INTERFACE identifier (? typeParameters) (? interfaceDeclaration.4) (? interfaceDeclaration.5) interfaceBody) todo]]
+    [interfaceDeclaration.4
+     [(EXTENDS typeList) todo]]
+    [interfaceDeclaration.5
+     [(PERMITS typeList) todo]]
+    [classBody
+     [(LBRACE (* classBodyDeclaration) RBRACE) todo]]
+    [interfaceBody
+     [(LBRACE (* interfaceBodyDeclaration) RBRACE) todo]]
+    [classBodyDeclaration
+     [(SEMI) todo]
+     [(classBodyDeclaration.1 block) todo]
+     [((* modifier) memberDeclaration) todo]]
+    [classBodyDeclaration.1
+     [(STATIC) #t]
+     [() #f]]
+    [memberDeclaration
+     [(recordDeclaration) todo]
+     [(methodDeclaration) todo]
+     [(genericMethodDeclaration) todo]
+     [(fieldDeclaration) todo]
+     [(constructorDeclaration) todo]
+     [(genericConstructorDeclaration) todo]
+     [(interfaceDeclaration) todo]
+     [(annotationTypeDeclaration) todo]
+     [(classDeclaration) todo]
+     [(enumDeclaration) todo]]
+    [methodDeclaration
+     [(typeTypeOrVoid identifier formalParameters (* brackets) (? methodDeclaration.5) methodBody) todo]]
+    [brackets
+     [(LBRACK RBRACK) todo]]
+    [methodDeclaration.5
+     [(THROWS qualifiedNameList) todo]]
+    [methodBody
+     [(block) todo]
+     [(SEMI) todo]]
+    [typeTypeOrVoid
+     [(typeType) todo]
+     [(VOID) todo]]
+    [genericMethodDeclaration
+     [(typeParameters methodDeclaration) todo]]
+    [genericConstructorDeclaration
+     [(typeParameters constructorDeclaration) todo]]
+    [constructorDeclaration
+     [(identifier formalParameters (? constructorDeclaration.3) block) todo]] ;constructorBody = block
+    [constructorDeclaration.3
+     [(THROWS qualifiedNameList) todo]]
+    [compactConstructorDeclaration
+     [((* modifier) identifier block) todo]] ;constructorBody = block
+    [fieldDeclaration
+     [(typeType variableDeclarators SEMI) todo]]
+    [interfaceBodyDeclaration
+     [((* modifier) interfaceMemberDeclaration) todo]
+     [(SEMI) todo]]
+    [interfaceMemberDeclaration
+     [(recordDeclaration) todo]
+     [(constDeclaration) todo]
+     [(interfaceMethodDeclaration) todo]
+     [(genericInterfaceMethodDeclaration) todo]
+     [(interfaceDeclaration) todo]
+     [(annotationTypeDeclaration) todo]
+     [(classDeclaration) todo]
+     [(enumDeclaration) todo]]
+    [constDeclaration
+     [(typeType (sep-by COMMA constantDeclarator) SEMI) todo]]
+    [constantDeclarator
+     [(identifier (* brackets) ASSIGN variableInitializer) todo]]
+    [interfaceMethodDeclaration
+     [((* interfaceMethodModifier) interfaceCommonBodyDeclaration) todo]]
+    [interfaceMethodModifier
+     [(annotation) todo]
+     [(PUBLIC) todo]
+     [(ABSTRACT) todo]
+     [(DEFAULT) todo]
+     [(STATIC) todo]
+     [(STRICTFP) todo]]
+    [genericInterfaceMethodDeclaration
+     [((* interfaceMethodModifier) typeParameters interfaceCommonBodyDeclaration) todo]]
+    [interfaceCommonBodyDeclaration
+     [(annotation* typeTypeOrVoid identifier formalParameters (* brackets) (? interfaceCommonBodyDeclaration.6) methodBody) todo]]
+    [interfaceCommonBodyDeclaration.6
+     [(THROWS qualifiedNameList) todo]]
+    [variableDeclarators
+     [((sep-by COMMA variableDeclarator)) todo]]
+    [variableDeclarator
+     [(variableDeclaratorId (? variableDeclarator.2)) todo]]
+    [variableDeclarator.2
+     [(ASSIGN variableInitializer) todo]]
+    [variableDeclaratorId
+     [(identifier (* brackets)) todo]]
+    [variableInitializer
+     [(arrayInitializer) todo]
+     [(expression) todo]]
+    [arrayInitializer
+     [(LBRACE (? arrayInitializer.2) RBRACE) todo]]
+    [arrayInitializer.2
+     [((sep-by COMMA variableInitializer) (? COMMA)) todo]]
     ;----
     [variableDeclaratorId ;257
      [(identifier (* variableDeclaratorId.2)) todo]]
