@@ -32,7 +32,7 @@
   ;; --- Grammar operator infrastructure ---
 
   (struct production-defn (rhs-items action) #:transparent)
-  (struct symbol-fn-defn (param productions) #:transparent)
+  (struct symbol-fn-defn (params productions) #:transparent)
 
   (struct grammar-operator-info (defn) #:transparent)
 
@@ -50,7 +50,7 @@
   (define (lower expr-stx defined-lhs)
     (define expr (syntax->datum expr-stx))
     (match expr
-      [(list (? symbol? op-sym) _)
+      [(list (? symbol? op-sym) _ ...)
        (define op-stx (car (syntax->list expr-stx)))
        (define lookup-stx (grammar-op-id op-stx))
        (define info (syntax-local-value lookup-stx (lambda () #f)))
@@ -59,18 +59,30 @@
                              (format "未知的文法算子：~a" op-sym)
                              expr-stx))
        (define defn (grammar-operator-info-defn info))
-       (define inner-stx (cadr (syntax->list expr-stx)))
-       (define-values (r rs) (lower inner-stx defined-lhs))
-       (define nt (helper-nt-name (cons op-sym r) defined-lhs))
+       (define param-syms (symbol-fn-defn-params defn))
+       (define inner-stxs (cdr (syntax->list expr-stx)))
+       (unless (= (length inner-stxs) (length param-syms))
+         (raise-syntax-error 'ext-parser
+                             (format "文法算子 ~a 需要 ~a 个参数，实际提供 ~a 个"
+                                     op-sym (length param-syms) (length inner-stxs))
+                             expr-stx))
+       (define-values (roots-rev extras-rev)
+         (for/fold ([roots-rev '()] [extras-rev '()])
+                   ([inner-stx inner-stxs])
+           (define-values (r rs) (lower inner-stx defined-lhs))
+           (values (cons r roots-rev) (push-list-rev rs extras-rev))))
+       (define roots (reverse roots-rev))
+       (define param-map (map cons param-syms roots))
+       (define nt (helper-nt-name (cons op-sym roots) defined-lhs))
        (define new-triples
          (for/list ([p (symbol-fn-defn-productions defn)])
            (define resolved-rhs
              (for/list ([item (production-defn-rhs-items p)])
-               (cond [(eq? item (symbol-fn-defn-param defn)) r]
+               (cond [(assq item param-map) => cdr]
                      [(eq? item '_) nt]
                      [else item])))
            (list nt resolved-rhs (production-defn-action p))))
-       (values nt (append rs new-triples))]
+       (values nt (append (reverse extras-rev) new-triples))]
       [(? symbol?)
        (values expr '())]
       [_ (raise-syntax-error 'ext-parser
@@ -165,12 +177,10 @@
                        c c)
         c)))
 
-;; --- User-facing macro ---
-
 (define-syntax (define-grammar-operator stx)
   (syntax-parse stx
-    [(_ (op:id param:id) [(~datum _) [rhs action] ...])
-     (define param-sym (syntax-e #'param))
+    [(_ (op:id param:id ...) [(~datum _) [rhs action] ...])
+     (define param-syms (map syntax-e (syntax->list #'(param ...))))
      (define rhs-stxs (syntax->list #'(rhs ...)))
      (define act-stxs (syntax->list #'(action ...)))
      (define prods
@@ -179,7 +189,7 @@
                (syntax->datum act-stx))))
      #`(define-syntax #,(grammar-op-id #'op)
          (grammar-operator-info
-          (symbol-fn-defn '#,param-sym
+          (symbol-fn-defn '#,param-syms
                           (list #,@(for/list ([p prods])
                                      #`(production-defn '#,(car p) '#,(cadr p)))))))]))
 
@@ -210,6 +220,11 @@
     [_
      [(s) (cons $1 '())]
      [(s _) (cons $1 $2)]])
+  ; (define-grammar-operator (join separator element)
+  ;   [key
+  ;    [(element (* rest)) (cons $1 $2)]]
+  ;   [rest
+  ;    [(separator element) $1]])
   (pretty-display (+ 1 2))
   (pretty-display
    (syntax->datum
@@ -226,17 +241,6 @@
           [((? NUM)) $1]]
          [term
           [((? NUM) (* LPAREN) (+ RPAREN)) (list $1 $2 $3)]]]))))
-  (pretty-display
-   (syntax->datum
-    (expand-once
-     #'(ext-parser
-        [start expr]
-        [end EOF]
-        [error (lambda args (error 'my-parser (format "parse error: ~s" args)))]
-        [tokens value-tokens op-tokens]
-        [grammar
-         [expr
-          [((+ NUM)) $1]]]))))
   (pretty-display
    (syntax->datum
     (expand-once
