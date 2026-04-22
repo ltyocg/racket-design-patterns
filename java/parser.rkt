@@ -90,13 +90,13 @@
     [classDeclaration.6
      [(PERMITS typeList) todo]]
     [typeParameters
-     [(LT (sep-by COMMA typeParameter) GT) todo]]
+     [(LT (sep-by COMMA typeParameter) GT) $2]]
     [typeParameter
      [((* annotation) identifier (? typeParameter.3)) todo]]
     [typeParameter.3
      [(EXTENDS (* annotation) typeBound) todo]]
     [typeBound
-     [((sep-by BITAND typeType)) todo]]
+     [((sep-by BITAND typeType)) $1]]
     [enumDeclaration
      [(ENUM identifier (? enumDeclaration.3) LBRACE (? enumConstants) (? enumDeclaration.6) (? enumBodyDeclarations) RBRACE) todo]]
     [enumConstants
@@ -189,7 +189,7 @@
     [interfaceCommonBodyDeclaration.6
      [(THROWS qualifiedNameList) todo]]
     [variableDeclarators
-     [((sep-by COMMA variableDeclarator)) todo]]
+     [((sep-by COMMA variableDeclarator)) $1]]
     [variableDeclarator
      [(variableDeclaratorId (? variableDeclarator.2)) todo]]
     [variableDeclarator.2
@@ -203,23 +203,49 @@
      [(LBRACE (? arrayInitializer.2) RBRACE) todo]]
     [arrayInitializer.2
      [((sep-by COMMA variableInitializer) (? COMMA)) todo]]
-    ;----
-    [variableDeclaratorId ;257
-     [(identifier (* variableDeclaratorId.2)) todo]]
-    [variableDeclaratorId.2
-     [(LBRACK RBRACK) todo]]
-    [packageName ;276
-     [(identifier (* packageName.2)) (cons $1 $2)]]
-    [packageName.2
-     [(DOT identifier) $2]]
-    [qualifiedNameList ;285
-     [(qualifiedName (* qualifiedNameList.2)) (cons $1 $2)]]
-    [qualifiedNameList.2
-     [(COMMA qualifiedName) $2]]
-    [qualifiedName ;316
-     [(identifier (* qualifiedName.2)) (cons $1 $2)]]
-    [qualifiedName.2
-     [(DOT identifier) $2]]
+    [classType
+     [((+ classType.1) (* classType.2)) todo]]
+    [classType.1
+     [((? classType.1.1) typeIdentifier (? typeArguments)) todo]]
+    [classType.1.1
+     [(packageName DOT (* annotation)) todo]]
+    [classType.2
+     [(DOT (* annotation) typeIdentifier (? typeArguments)) todo]]
+    [packageName
+     [((sep-by DOT identifier)) $1]]
+    [typeArgument
+     [(typeType) todo]
+     [((* annotation) QUESTION (? typeArgument.3)) todo]]
+    [typeArgument.3
+     [(typeArgument.3.1 typeType) todo]]
+    [typeArgument.3.1
+     [(EXTENDS) 'extends]
+     [(SUPER) 'super]]
+    [qualifiedNameList
+     [((sep-by COMMA qualifiedName)) $1]]
+    [formalParameters
+     [(LPAREN (? formalParameters.2) RPAREN) $2]]
+    [formalParameters.2
+     [(formalParameters.2.1 (* formalParameters.2.2)) todo]]
+    [formalParameters.2.1
+     [(receiverParameter) todo]
+     [(formalParameter) todo]]
+    [formalParameters.2.2
+     [(COMMA formalParameterList) $2]]
+    [receiverParameter
+     [(typeType (* receiverParameter.2) THIS) todo]]
+    [receiverParameter.2
+     [(identifier DOT) todo]]
+    [formalParameterList
+     [((sep-by COMMA formalParameter)) $1]]
+    [formalParameter
+     [((* variableModifier) typeType (? formalParameter.3) variableDeclaratorId) todo]]
+    [lambdaLVTIList
+     [((sep-by COMMA lambdaLVTIParameter)) $1]]
+    [lambdaLVTIParameter
+     [((* variableModifier) VAR identifier) todo]]
+    [qualifiedName
+     [(sep-by DOT identifier) $1]]
     [literal
      [(integerLiteral) $1]
      [(floatLiteral) $1]
@@ -233,10 +259,95 @@
      [(HEX_LITERAL) (ast-integer-literal $1)]
      [(OCT_LITERAL) (ast-integer-literal $1)]
      [(BINARY_LITERAL) (ast-integer-literal $1)]]
-    [floatLiteral ;337
+    [floatLiteral
      [(FLOAT_LITERAL) (ast-float-literal $1)]
      [(HEX_FLOAT_LITERAL) (ast-float-literal $1)]]
-    [identifier ;480
+    [altAnnotationQualifiedName
+     [((* altAnnotationQualifiedName.1) AT identifier) todo]]
+    [annotation
+     [(annotation.1 (? annotationFieldValues)) todo]]
+    [annotation.1
+     [(AT qualifiedName) $2]]
+    [annotationFieldValues
+     [(LPAREN (? (sep-by COMMA annotationFieldValue)) RPAREN) $2]]
+    [annotationFieldValue
+     [(identifier ASSIGN annotationValue) todo]
+     [(annotationValue) todo]]
+    [annotationValue
+     [(expression) todo]
+     [(annotation) todo]
+     [(LBRACE (? (sep-by COMMA annotationValue)) (? COMMA) RBRACE) $2]]
+    [elementValue
+     [(expression) todo]
+     [(annotation) todo]
+     [(elementValueArrayInitializer) todo]]
+    [elementValueArrayInitializer
+     [(LBRACE (? (sep-by COMMA elementValue)) (? COMMA) RBRACE) todo]]
+    [annotationTypeDeclaration
+     [(AT INTERFACE identifier annotationTypeBody) todo]]
+    [annotationTypeBody
+     [(LBRACE (* annotationTypeElementDeclaration) RBRACE) todo]]
+    [annotationTypeElementDeclaration
+     [((* modifier) annotationTypeElementRest) todo]
+     [(SEMI) null]]
+    [annotationTypeElementRest
+     [(typeType annotationMethodOrConstantRest SEMI) todo]
+     [(classDeclaration (? SEMI)) $1]
+     [(interfaceDeclaration (? SEMI)) $1]
+     [(enumDeclaration (? SEMI)) $1]
+     [(annotationTypeDeclaration (? SEMI)) $1]
+     [(recordDeclaration (? SEMI)) $1]]
+    [annotationMethodOrConstantRest
+     [(annotationMethodRest) $1]
+     [(annotationConstantRest) $1]]
+    [annotationMethodRest
+     [(identifier LPAREN RPAREN (? defaultValue)) todo]]
+    [annotationConstantRest
+     [(variableDeclarators) todo]]
+    [defaultValue
+      [(DEFAULT elementValue) todo]]
+    [moduleDeclaration
+     [((* annotation) (? OPEN) MODULE qualifiedName LBRACE (* moduleDirective) RBRACE) todo]]
+    [moduleDirective
+     [(REQUIRES (* requiresModifier) qualifiedName SEMI) todo]
+     [(EXPORTS qualifiedName (? moduleDirective.3) SEMI) todo]
+     [(OPENS qualifiedName (? moduleDirective.3) SEMI) todo]
+     [(USES qualifiedName SEMI) todo]
+     [(PROVIDES qualifiedName WITH (sep-by COMMA qualifiedName) SEMI) todo]]
+    [moduleDirective.3
+     [(TO (sep-by COMMA qualifiedName)) todo]]
+    [requiresModifier
+     [(TRANSITIVE) 'transitive]
+     [(STATIC) 'static]]
+    [recordDeclaration
+     [(RECORD identifier (? typeParameters) recordHeader (? recordDeclaration.5) recordBody) todo]]
+    [recordDeclaration.5
+     [(IMPLEMENTS typeList) $2]]
+    [recordHeader
+     [(LPAREN (? recordComponentList) RPAREN) $2]]
+    [recordComponentList
+     [((sep-by COMMA recordComponent)) $1]]
+    [recordComponent
+     [((* annotation) typeType (? recordComponent.3) identifier) todo]]
+    [recordComponent.3
+     [((* annotation) ELLIPSIS) todo]]
+    [recordBody
+     [(LBRACE (* recordBody.2) RBRACE) todo]]
+    [recordBody.2
+     [(classBodyDeclaration) $1]
+     [(compactConstructorDeclaration) $1]]
+    [block
+     [(LBRACE (* blockStatement) RBRACE) $2]]
+    [blockStatement
+     [(localVariableDeclaration SEMI) $1]
+     [(localTypeDeclaration) $1]
+     [(statement) $1]]
+    [localVariableDeclaration
+     [((* variableModifier) localVariableDeclaration.2) todo]]
+    [localVariableDeclaration.2
+     [(VAR identifier ASSIGN expression) todo]
+     [(typeType variableDeclarators) todo]]
+    [identifier
      [(IDENTIFIER) $1]
      [(MODULE) "module"]
      [(OPEN) "open"]
@@ -254,6 +365,56 @@
      [(PERMITS) "permits"]
      [(RECORD) "record"]
      [(VAR) "var"]]
+    [typeIdentifier
+     [(IDENTIFIER) $1]
+     [(MODULE) "module"]
+     [(OPEN) "open"]
+     [(REQUIRES) "requires"]
+     [(EXPORTS) "exports"]
+     [(OPENS) "opens"]
+     [(TO) "to"]
+     [(USES) "uses"]
+     [(PROVIDES) "provides"]
+     [(WITH) "with"]
+     [(TRANSITIVE) "transitive"]
+     [(SEALED) "sealed"]]
+    [localTypeDeclaration
+     [((* classOrInterfaceModifier) localTypeDeclaration.2) todo]]
+    [localTypeDeclaration.2
+     [(classDeclaration) $1]
+     [(interfaceDeclaration) $1]
+     [(recordDeclaration) $1]
+     [(enumDeclaration) $1]]
+    [statement
+     [(block) $1] ;blockLabel = block
+     [(ASSERT expression (? statement.3/2) SEMI) todo]
+     [(IF LPAREN expression RPAREN statement (? statement.6)) todo]
+     [(FOR LPAREN forControl RPAREN statement) todo]
+     [(WHILE LPAREN expression RPAREN statement) todo]
+     [(DO statement WHILE LPAREN expression RPAREN SEMI) todo]
+     [(TRY block statement.3/7) todo]
+     [(TRY resourceSpecification block (* catchClause) (? finallyBlock)) todo]
+     [(SWITCH LPAREN expression RPAREN LBRACE (* switchBlockStatementGroup) (* switchLabel) RBRACE) todo]
+     [(SYNCHRONIZED RPAREN expression RPAREN block) todo]
+     [(RETURN (? expression) SEMI) todo]
+     [(THROW expression SEMI) todo]
+     [(BREAK (? identifier) SEMI) todo]
+     [(CONTINUE (? identifier) SEMI) todo]
+     [(YIELD (? expression) SEMI) todo]
+     [(SEMI) null]
+     [(expression SEMI) todo] ;statementExpression = expression
+     [(switchExpression (? SEMI)) todo]
+     [(identifier COLON statement) todo]] ;identifierLabel = identifier
+    [statement.3/2
+     [(COLON expression) $2]]
+    [statement.6
+     [(ELSE statement) $2]]
+    [statement.3/7
+     [((+ catchClause) (? finallyBlock)) todo]
+     [(finallyBlock) todo]]
+    [catchClause
+     [(CATCH RPAREN (* variableModifier) catchType identifier RPAREN block) todo]]
+    ; ----
     [primary ;710*
      [(THIS) 'this]
      [(SUPER) 'super]
