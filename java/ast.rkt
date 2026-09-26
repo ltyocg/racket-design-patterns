@@ -5,6 +5,6 @@
 (struct ast-char-literal (value) #:transparent)
 (struct ast-string-literal (value) #:transparent)
 (struct ast-bool-literal (value) #:transparent)
-(struct ast-null-literal (value) #:transparent)
+(struct ast-null-literal () #:transparent)
 (struct ast-text-block (value) #:transparent)
 (provide (all-defined-out))

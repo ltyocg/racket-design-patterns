@@ -117,6 +117,7 @@
    ARROW
    COLONCOLON
    AT
+   AT_INTERFACE
    ELLIPSIS
    EOF))
 (define-tokens tokens
@@ -360,6 +361,7 @@
    [">>>=" (token-URSHIFT_ASSIGN)]
    ["->" (token-ARROW)]
    ["::" (token-COLONCOLON)]
+   ["@interface" (token-AT_INTERFACE)]
    ["@" (token-AT)]
    ["..." (token-ELLIPSIS)]
    [(:+ (char-set " \t\r\n\u000C")) (token-WS lexeme)]
