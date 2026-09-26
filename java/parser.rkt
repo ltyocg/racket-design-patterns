@@ -7,16 +7,7 @@
 (provide java-parser
          parse-java-code
          parse-java-file
-         java-node
-         java-node?
-         java-node-kind
-         java-node-children
-         node)
-
-(struct java-node (kind children) #:transparent)
-
-(define (node kind . children)
-  (java-node kind children))
+         (all-from-out "ast.rkt"))
 
 (define (skip-token? tok)
   (define token-value (position-token-token tok))
@@ -68,28 +59,28 @@
    [expected-RR-conflicts 585]
    [grammar
     [compilationUnit
-     [((* annotation) compilationUnit.1) (node 'compilationUnit $1 $2)]
-     [(modularCompulationUnit) (node 'compilationUnit $1)]]
+     [((* annotation) compilationUnit.1) (ast-compilation-unit (list $1 $2))]
+     [(modularCompulationUnit) (ast-compilation-unit (list $1))]]
     [compilationUnit.1
-     [(PACKAGE qualifiedName SEMI (* compilationUnit.2) (* compilationUnit.3)) (node 'compilationUnit.1 'PACKAGE $2 'SEMI $4 $5)]
-     [((* compilationUnit.2) (* compilationUnit.3)) (node 'compilationUnit.1 $1 $2)]]
+     [(PACKAGE qualifiedName SEMI (* compilationUnit.2) (* compilationUnit.3)) (ast-compilation-unit-body (list 'PACKAGE $2 'SEMI $4 $5))]
+     [((* compilationUnit.2) (* compilationUnit.3)) (ast-compilation-unit-body (list $1 $2))]]
     [compilationUnit.2
-     [(importDeclaration) (node 'compilationUnit.2 $1)]
+     [(importDeclaration) (ast-compilation-unit-import (list $1))]
      [(SEMI) '()]]
     [compilationUnit.3
-     [(typeDeclaration) (node 'compilationUnit.3 $1)]
+     [(typeDeclaration) (ast-compilation-unit-type (list $1))]
      [(SEMI) '()]]
     [modularCompulationUnit
-     [((* importDeclaration) moduleDeclaration) (node 'modularCompulationUnit $1 $2)]]
+     [((* importDeclaration) moduleDeclaration) (ast-modular-compilation-unit (list $1 $2))]]
     [packageDeclaration
-     [((* annotation) PACKAGE qualifiedName SEMI) (node 'packageDeclaration $1 'PACKAGE $3 'SEMI)]]
+     [((* annotation) PACKAGE qualifiedName SEMI) (ast-package-declaration (list $1 'PACKAGE $3 'SEMI))]]
     [importDeclaration
-     [(IMPORT (?->bool STATIC) qualifiedName importDeclaration.4 SEMI) (node 'importDeclaration 'IMPORT $2 $3 $4 'SEMI)]]
+     [(IMPORT (?->bool STATIC) qualifiedName importDeclaration.4 SEMI) (ast-import-declaration (list 'IMPORT $2 $3 $4 'SEMI))]]
     [importDeclaration.4
      [(DOT MUL) #t]
      [() #f]]
     [typeDeclaration
-     [((* annotation) (* typeDeclarationModifier) typeDeclaration.2) (node 'typeDeclaration $1 $2 $3)]]
+     [((* annotation) (* typeDeclarationModifier) typeDeclaration.2) (ast-type-declaration (list $1 $2 $3))]]
     [typeDeclarationModifier
      [(PUBLIC) 'public]
      [(PROTECTED) 'protected]
@@ -101,20 +92,20 @@
      [(SEALED) 'sealed]
      [(NON_SEALED) 'non-sealed]]
     [typeDeclaration.2
-     [(classDeclaration) (node 'typeDeclaration.2 $1)]
-     [(enumDeclaration) (node 'typeDeclaration.2 $1)]
-     [(interfaceDeclaration) (node 'typeDeclaration.2 $1)]
-     [(annotationTypeDeclaration) (node 'typeDeclaration.2 $1)]
-     [(recordDeclaration) (node 'typeDeclaration.2 $1)]]
+     [(classDeclaration) (ast-type-declaration-body (list $1))]
+     [(enumDeclaration) (ast-type-declaration-body (list $1))]
+     [(interfaceDeclaration) (ast-type-declaration-body (list $1))]
+     [(annotationTypeDeclaration) (ast-type-declaration-body (list $1))]
+     [(recordDeclaration) (ast-type-declaration-body (list $1))]]
     [modifier
-     [(classOrInterfaceModifier) (node 'modifier $1)]
+     [(classOrInterfaceModifier) (ast-modifier (list $1))]
      [(NATIVE) 'native]
      [(SYNCHRONIZED) 'synchronized]
      [(TRANSIENT) 'transient]
      [(VOLATILE) 'volatile]
      [(DEFAULT) 'default]]
     [classOrInterfaceModifier
-     [(annotation) (node 'classOrInterfaceModifier $1)]
+     [(annotation) (ast-class-or-interface-modifier (list $1))]
      [(PUBLIC) 'public]
      [(PROTECTED) 'protected]
      [(PRIVATE) 'private]
@@ -126,164 +117,164 @@
      [(NON_SEALED) 'non-sealed]]
     [variableModifier
      [(FINAL) 'final]
-     [(annotation) (node 'variableModifier $1)]]
+     [(annotation) (ast-variable-modifier (list $1))]]
     [classDeclaration
-     [(CLASS identifier (? typeParameters) (? classDeclaration.4) (? classDeclaration.5) (? classDeclaration.6) classBody) (node 'classDeclaration 'CLASS $2 $3 $4 $5 $6 $7)]]
+     [(CLASS identifier (? typeParameters) (? classDeclaration.4) (? classDeclaration.5) (? classDeclaration.6) classBody) (ast-class-declaration (list 'CLASS $2 $3 $4 $5 $6 $7))]]
     [classDeclaration.4
-     [(EXTENDS typeType) (node 'classDeclaration.4 'EXTENDS $2)]]
+     [(EXTENDS typeType) (ast-class-declaration-extends (list 'EXTENDS $2))]]
     [classDeclaration.5
-     [(IMPLEMENTS typeList) (node 'classDeclaration.5 'IMPLEMENTS $2)]]
+     [(IMPLEMENTS typeList) (ast-class-declaration-implements (list 'IMPLEMENTS $2))]]
     [classDeclaration.6
-     [(PERMITS typeList) (node 'classDeclaration.6 'PERMITS $2)]]
+     [(PERMITS typeList) (ast-class-declaration-permits (list 'PERMITS $2))]]
     [typeParameters
      [(LT (sep-by COMMA typeParameter) GT) $2]]
     [typeParameter
-     [((* annotation) identifier (? typeParameter.3)) (node 'typeParameter $1 $2 $3)]]
+     [((* annotation) identifier (? typeParameter.3)) (ast-type-parameter (list $1 $2 $3))]]
     [typeParameter.3
-     [(EXTENDS (* annotation) typeBound) (node 'typeParameter.3 'EXTENDS $2 $3)]]
+     [(EXTENDS (* annotation) typeBound) (ast-type-parameter-bound (list 'EXTENDS $2 $3))]]
     [typeBound
      [((sep-by BITAND typeType)) $1]]
     [enumDeclaration
-     [(ENUM identifier (? enumDeclaration.3) LBRACE (? enumConstants) (?->bool COMMA) (? enumBodyDeclarations) RBRACE) (node 'enumDeclaration 'ENUM $2 $3 'LBRACE $5 $6 $7 'RBRACE)]]
+     [(ENUM identifier (? enumDeclaration.3) LBRACE (? enumConstants) (?->bool COMMA) (? enumBodyDeclarations) RBRACE) (ast-enum-declaration (list 'ENUM $2 $3 'LBRACE $5 $6 $7 'RBRACE))]]
     [enumConstants
-     [((sep-by COMMA enumConstant)) (node 'enumConstants $1)]]
+     [((sep-by COMMA enumConstant)) (ast-enum-constants (list $1))]]
     [enumConstant
-     [((* annotation) identifier (? arguments) (? classBody)) (node 'enumConstant $1 $2 $3 $4)]]
+     [((* annotation) identifier (? arguments) (? classBody)) (ast-enum-constant (list $1 $2 $3 $4))]]
     [enumBodyDeclarations
-     [(SEMI (* classBodyDeclaration)) (node 'enumBodyDeclarations 'SEMI $2)]]
+     [(SEMI (* classBodyDeclaration)) (ast-enum-body-declarations (list 'SEMI $2))]]
     [interfaceDeclaration
-     [(INTERFACE identifier (? typeParameters) (? interfaceDeclaration.4) (? interfaceDeclaration.5) interfaceBody) (node 'interfaceDeclaration 'INTERFACE $2 $3 $4 $5 $6)]]
+     [(INTERFACE identifier (? typeParameters) (? interfaceDeclaration.4) (? interfaceDeclaration.5) interfaceBody) (ast-interface-declaration (list 'INTERFACE $2 $3 $4 $5 $6))]]
     [interfaceDeclaration.4
-     [(EXTENDS typeList) (node 'interfaceDeclaration.4 'EXTENDS $2)]]
+     [(EXTENDS typeList) (ast-interface-declaration-extends (list 'EXTENDS $2))]]
     [interfaceDeclaration.5
-     [(PERMITS typeList) (node 'interfaceDeclaration.5 'PERMITS $2)]]
+     [(PERMITS typeList) (ast-interface-declaration-permits (list 'PERMITS $2))]]
     [classBody
-     [(LBRACE (* classBodyDeclaration) RBRACE) (node 'classBody 'LBRACE $2 'RBRACE)]]
+     [(LBRACE (* classBodyDeclaration) RBRACE) (ast-class-body (list 'LBRACE $2 'RBRACE))]]
     [interfaceBody
-     [(LBRACE (* interfaceBodyDeclaration) RBRACE) (node 'interfaceBody 'LBRACE $2 'RBRACE)]]
+     [(LBRACE (* interfaceBodyDeclaration) RBRACE) (ast-interface-body (list 'LBRACE $2 'RBRACE))]]
     [classBodyDeclaration
-     [(SEMI) (node 'classBodyDeclaration 'SEMI)]
-     [((?->bool STATIC) block) (node 'classBodyDeclaration $1 $2)]
-     [((* modifier) memberDeclaration) (node 'classBodyDeclaration $1 $2)]]
+     [(SEMI) (ast-class-body-declaration (list 'SEMI))]
+     [((?->bool STATIC) block) (ast-class-body-declaration (list $1 $2))]
+     [((* modifier) memberDeclaration) (ast-class-body-declaration (list $1 $2))]]
     [memberDeclaration
-     [(recordDeclaration) (node 'memberDeclaration $1)]
-     [(memberCommonDeclaration) (node 'memberDeclaration $1)]
-     [(typeParameters memberCommonDeclaration) (node 'genericMemberDeclaration $1 $2)]
-     [(interfaceDeclaration) (node 'memberDeclaration $1)]
-     [(annotationTypeDeclaration) (node 'memberDeclaration $1)]
-     [(classDeclaration) (node 'memberDeclaration $1)]
-     [(enumDeclaration) (node 'memberDeclaration $1)]]
+     [(recordDeclaration) (ast-member-declaration (list $1))]
+     [(memberCommonDeclaration) (ast-member-declaration (list $1))]
+     [(typeParameters memberCommonDeclaration) (ast-generic-member-declaration (list $1 $2))]
+     [(interfaceDeclaration) (ast-member-declaration (list $1))]
+     [(annotationTypeDeclaration) (ast-member-declaration (list $1))]
+     [(classDeclaration) (ast-member-declaration (list $1))]
+     [(enumDeclaration) (ast-member-declaration (list $1))]]
     [memberCommonDeclaration
-     [(typeTypeOrVoid memberCommonDeclaration.2) (node 'memberCommonDeclaration $1 $2)]]
+     [(typeTypeOrVoid memberCommonDeclaration.2) (ast-member-common-declaration (list $1 $2))]]
     [memberCommonDeclaration.2
      [(identifier formalParameters (* brackets) (? methodDeclaration.5) methodBody)
-      (node 'methodDeclaration $1 $2 $3 $4 $5)]
+      (ast-method-declaration (list $1 $2 $3 $4 $5))]
      [(formalParameters (? constructorDeclaration.3) block)
-      (node 'constructorDeclaration $1 $2 $3)]
+      (ast-constructor-declaration (list $1 $2 $3))]
      [(identifier (* brackets) (? variableDeclarator.2) (* memberCommonDeclaration.3) SEMI)
-      (node 'fieldDeclaration
-            (cons (node 'variableDeclarator
-                        (node 'variableDeclaratorId $1 $2)
-                        $3)
+      (ast-field-declaration (list
+            (cons (ast-variable-declarator (list
+                        (ast-variable-declarator-id (list $1 $2))
+                        $3))
                   $4)
-            'SEMI)]]
+            'SEMI))]]
     [memberCommonDeclaration.3
      [(COMMA variableDeclarator) $2]]
     [methodDeclaration
-     [(typeTypeOrVoid identifier formalParameters (* brackets) (? methodDeclaration.5) methodBody) (node 'methodDeclaration $1 $2 $3 $4 $5 $6)]]
+     [(typeTypeOrVoid identifier formalParameters (* brackets) (? methodDeclaration.5) methodBody) (ast-method-declaration (list $1 $2 $3 $4 $5 $6))]]
     [brackets
-     [(LBRACK RBRACK) (node 'brackets 'LBRACK 'RBRACK)]]
+     [(LBRACK RBRACK) (ast-brackets (list 'LBRACK 'RBRACK))]]
     [methodDeclaration.5
-     [(THROWS qualifiedNameList) (node 'methodDeclaration.5 'THROWS $2)]]
+     [(THROWS qualifiedNameList) (ast-method-declaration-throws (list 'THROWS $2))]]
     [methodBody
-     [(block) (node 'methodBody $1)]
-     [(SEMI) (node 'methodBody 'SEMI)]]
+     [(block) (ast-method-body (list $1))]
+     [(SEMI) (ast-method-body (list 'SEMI))]]
     [typeTypeOrVoid
-     [(typeType) (node 'typeTypeOrVoid $1)]
-     [(VOID) (node 'typeTypeOrVoid 'VOID)]]
+     [(typeType) (ast-type-type-or-void (list $1))]
+     [(VOID) (ast-type-type-or-void (list 'VOID))]]
     [genericMethodDeclaration
-     [(typeParameters memberCommonDeclaration) (node 'genericMethodDeclaration $1 $2)]]
+     [(typeParameters memberCommonDeclaration) (ast-generic-method-declaration (list $1 $2))]]
     [genericConstructorDeclaration
-     [(typeParameters constructorDeclaration) (node 'genericConstructorDeclaration $1 $2)]]
+     [(typeParameters constructorDeclaration) (ast-generic-constructor-declaration (list $1 $2))]]
     [constructorDeclaration
-     [(identifier formalParameters (? constructorDeclaration.3) block) (node 'constructorDeclaration $1 $2 $3 $4)]] ;constructorBody = block
+     [(identifier formalParameters (? constructorDeclaration.3) block) (ast-constructor-declaration (list $1 $2 $3 $4))]] ;constructorBody = block
     [constructorDeclaration.3
-     [(THROWS qualifiedNameList) (node 'constructorDeclaration.3 'THROWS $2)]]
+     [(THROWS qualifiedNameList) (ast-constructor-declaration-throws (list 'THROWS $2))]]
     [compactConstructorDeclaration
-     [((* modifier) identifier block) (node 'compactConstructorDeclaration $1 $2 $3)]] ;constructorBody = block
+     [((* modifier) identifier block) (ast-compact-constructor-declaration (list $1 $2 $3))]] ;constructorBody = block
     [fieldDeclaration
-     [(typeType variableDeclarators SEMI) (node 'fieldDeclaration $1 $2 'SEMI)]]
+     [(typeType variableDeclarators SEMI) (ast-field-declaration (list $1 $2 'SEMI))]]
     [interfaceBodyDeclaration
-     [((* modifier) interfaceMemberDeclaration) (node 'interfaceBodyDeclaration $1 $2)]
-     [(SEMI) (node 'interfaceBodyDeclaration 'SEMI)]]
+     [((* modifier) interfaceMemberDeclaration) (ast-interface-body-declaration (list $1 $2))]
+     [(SEMI) (ast-interface-body-declaration (list 'SEMI))]]
     [interfaceMemberDeclaration
-     [(recordDeclaration) (node 'interfaceMemberDeclaration $1)]
-     [(interfaceCommonMemberDeclaration) (node 'interfaceMemberDeclaration $1)]
-     [(typeParameters interfaceCommonMemberDeclaration) (node 'genericInterfaceMemberDeclaration $1 $2)]
-     [(interfaceDeclaration) (node 'interfaceMemberDeclaration $1)]
-     [(annotationTypeDeclaration) (node 'interfaceMemberDeclaration $1)]
-     [(classDeclaration) (node 'interfaceMemberDeclaration $1)]
-     [(enumDeclaration) (node 'interfaceMemberDeclaration $1)]]
+     [(recordDeclaration) (ast-interface-member-declaration (list $1))]
+     [(interfaceCommonMemberDeclaration) (ast-interface-member-declaration (list $1))]
+     [(typeParameters interfaceCommonMemberDeclaration) (ast-generic-interface-member-declaration (list $1 $2))]
+     [(interfaceDeclaration) (ast-interface-member-declaration (list $1))]
+     [(annotationTypeDeclaration) (ast-interface-member-declaration (list $1))]
+     [(classDeclaration) (ast-interface-member-declaration (list $1))]
+     [(enumDeclaration) (ast-interface-member-declaration (list $1))]]
     [interfaceCommonMemberDeclaration
-     [(typeTypeOrVoid interfaceCommonMemberDeclaration.2) (node 'interfaceCommonMemberDeclaration $1 $2)]]
+     [(typeTypeOrVoid interfaceCommonMemberDeclaration.2) (ast-interface-common-member-declaration (list $1 $2))]]
     [interfaceCommonMemberDeclaration.2
      [(identifier formalParameters (* brackets) (? interfaceCommonBodyDeclaration.6) methodBody)
-      (node 'interfaceCommonBodyDeclaration '() $1 $2 $3 $4 $5)]
+      (ast-interface-common-body-declaration (list '() $1 $2 $3 $4 $5))]
      [(identifier (* brackets) ASSIGN variableInitializer (* interfaceCommonMemberDeclaration.3) SEMI)
-      (node 'constDeclaration
-            (cons (node 'constantDeclarator $1 $2 'ASSIGN $4) $5)
-            'SEMI)]]
+      (ast-const-declaration (list
+            (cons (ast-constant-declarator (list $1 $2 'ASSIGN $4)) $5)
+            'SEMI))]]
     [interfaceCommonMemberDeclaration.3
      [(COMMA constantDeclarator) $2]]
     [constDeclaration
-     [(typeType (sep-by COMMA constantDeclarator) SEMI) (node 'constDeclaration $1 $2 'SEMI)]]
+     [(typeType (sep-by COMMA constantDeclarator) SEMI) (ast-const-declaration (list $1 $2 'SEMI))]]
     [constantDeclarator
-     [(identifier (* brackets) ASSIGN variableInitializer) (node 'constantDeclarator $1 $2 'ASSIGN $4)]]
+     [(identifier (* brackets) ASSIGN variableInitializer) (ast-constant-declarator (list $1 $2 'ASSIGN $4))]]
     [interfaceMethodDeclaration
-     [((* interfaceMethodModifier) interfaceCommonBodyDeclaration) (node 'interfaceMethodDeclaration $1 $2)]]
+     [((* interfaceMethodModifier) interfaceCommonBodyDeclaration) (ast-interface-method-declaration (list $1 $2))]]
     [interfaceMethodModifier
-     [(annotation) (node 'interfaceMethodModifier $1)]
-     [(PUBLIC) (node 'interfaceMethodModifier 'PUBLIC)]
-     [(ABSTRACT) (node 'interfaceMethodModifier 'ABSTRACT)]
-     [(DEFAULT) (node 'interfaceMethodModifier 'DEFAULT)]
-     [(STATIC) (node 'interfaceMethodModifier 'STATIC)]
-     [(STRICTFP) (node 'interfaceMethodModifier 'STRICTFP)]]
+     [(annotation) (ast-interface-method-modifier (list $1))]
+     [(PUBLIC) (ast-interface-method-modifier (list 'PUBLIC))]
+     [(ABSTRACT) (ast-interface-method-modifier (list 'ABSTRACT))]
+     [(DEFAULT) (ast-interface-method-modifier (list 'DEFAULT))]
+     [(STATIC) (ast-interface-method-modifier (list 'STATIC))]
+     [(STRICTFP) (ast-interface-method-modifier (list 'STRICTFP))]]
     [genericInterfaceMethodDeclaration
-     [((* interfaceMethodModifier) typeParameters interfaceCommonBodyDeclaration) (node 'genericInterfaceMethodDeclaration $1 $2 $3)]]
+     [((* interfaceMethodModifier) typeParameters interfaceCommonBodyDeclaration) (ast-generic-interface-method-declaration (list $1 $2 $3))]]
     [interfaceCommonBodyDeclaration
-     [((* annotation) typeTypeOrVoid identifier formalParameters (* brackets) (? interfaceCommonBodyDeclaration.6) methodBody) (node 'interfaceCommonBodyDeclaration $1 $2 $3 $4 $5 $6 $7)]]
+     [((* annotation) typeTypeOrVoid identifier formalParameters (* brackets) (? interfaceCommonBodyDeclaration.6) methodBody) (ast-interface-common-body-declaration (list $1 $2 $3 $4 $5 $6 $7))]]
     [interfaceCommonBodyDeclaration.6
-     [(THROWS qualifiedNameList) (node 'interfaceCommonBodyDeclaration.6 'THROWS $2)]]
+     [(THROWS qualifiedNameList) (ast-interface-common-body-declaration-throws (list 'THROWS $2))]]
     [variableDeclarators
      [((sep-by COMMA variableDeclarator)) $1]]
     [variableDeclarator
-     [(variableDeclaratorId (? variableDeclarator.2)) (node 'variableDeclarator $1 $2)]]
+     [(variableDeclaratorId (? variableDeclarator.2)) (ast-variable-declarator (list $1 $2))]]
     [variableDeclarator.2
-     [(ASSIGN variableInitializer) (node 'variableDeclarator.2 'ASSIGN $2)]]
+     [(ASSIGN variableInitializer) (ast-variable-declarator-initializer (list 'ASSIGN $2))]]
     [variableDeclaratorId
-     [(identifier (* brackets)) (node 'variableDeclaratorId $1 $2)]]
+     [(identifier (* brackets)) (ast-variable-declarator-id (list $1 $2))]]
     [variableInitializer
-     [(arrayInitializer) (node 'variableInitializer $1)]
-     [(expression) (node 'variableInitializer $1)]]
+     [(arrayInitializer) (ast-variable-initializer (list $1))]
+     [(expression) (ast-variable-initializer (list $1))]]
     [arrayInitializer
-     [(LBRACE (? arrayInitializer.2) RBRACE) (node 'arrayInitializer 'LBRACE $2 'RBRACE)]]
+     [(LBRACE (? arrayInitializer.2) RBRACE) (ast-array-initializer (list 'LBRACE $2 'RBRACE))]]
     [arrayInitializer.2
-     [((sep-by COMMA variableInitializer) (?->bool COMMA)) (node 'arrayInitializer.2 $1 $2)]]
+     [((sep-by COMMA variableInitializer) (?->bool COMMA)) (ast-array-initializer-elements (list $1 $2))]]
     [classType
-     [(identifier (? typeArguments) (* classType.2)) (node 'classType $1 $2 $3)]]
+     [(identifier (? typeArguments) (* classType.2)) (ast-class-type (list $1 $2 $3))]]
     [classType.1
-     [((? classType.1.1) typeIdentifier (? typeArguments)) (node 'classType.1 $1 $2 $3)]]
+     [((? classType.1.1) typeIdentifier (? typeArguments)) (ast-class-type-segment (list $1 $2 $3))]]
     [classType.1.1
-     [(packageName DOT (* annotation)) (node 'classType.1.1 $1 'DOT $3)]]
+     [(packageName DOT (* annotation)) (ast-class-type-package-prefix (list $1 'DOT $3))]]
     [classType.2
-     [(DOT (* annotation) identifier (? typeArguments)) (node 'classType.2 'DOT $2 $3 $4)]]
+     [(DOT (* annotation) identifier (? typeArguments)) (ast-class-type-suffix (list 'DOT $2 $3 $4))]]
     [packageName
      [((sep-by DOT identifier)) $1]]
     [typeArgument
-     [(typeType) (node 'typeArgument $1)]
-     [((* annotation) QUESTION (? typeArgument.3)) (node 'typeArgument $1 'QUESTION $3)]]
+     [(typeType) (ast-type-argument (list $1))]
+     [((* annotation) QUESTION (? typeArgument.3)) (ast-type-argument (list $1 'QUESTION $3))]]
     [typeArgument.3
-     [(typeArgument.3.1 typeType) (node 'typeArgument.3 $1 $2)]]
+     [(typeArgument.3.1 typeType) (ast-type-argument-bound (list $1 $2))]]
     [typeArgument.3.1
      [(EXTENDS) 'extends]
      [(SUPER) 'super]]
@@ -292,41 +283,41 @@
     [formalParameters
      [(LPAREN (? formalParameters.2) RPAREN) $2]]
     [formalParameters.2
-     [(formalParameters.2.1 (* formalParameters.2.2)) (node 'formalParameters.2 $1 $2)]]
+     [(formalParameters.2.1 (* formalParameters.2.2)) (ast-formal-parameters-body (list $1 $2))]]
     [formalParameters.2.1
-     [(receiverParameter) (node 'formalParameters.2.1 $1)]
-     [(formalParameter) (node 'formalParameters.2.1 $1)]]
+     [(receiverParameter) (ast-formal-parameters-first (list $1))]
+     [(formalParameter) (ast-formal-parameters-first (list $1))]]
     [formalParameters.2.2
      [(COMMA formalParameterList) $2]]
     [receiverParameter
-     [(typeType (* receiverParameter.2) THIS) (node 'receiverParameter $1 $2 'THIS)]]
+     [(typeType (* receiverParameter.2) THIS) (ast-receiver-parameter (list $1 $2 'THIS))]]
     [receiverParameter.2
-     [(identifier DOT) (node 'receiverParameter.2 $1 'DOT)]]
+     [(identifier DOT) (ast-receiver-parameter-qualifier (list $1 'DOT))]]
     [formalParameterList
      [((sep-by COMMA formalParameter)) $1]]
     [formalParameter
      [(identifier (? typeArguments) (* classType.2) (* typeType.3) (? formalParameter.3) variableDeclaratorId)
-      (node 'formalParameter
+      (ast-formal-parameter (list
             '()
-            (node 'typeType
+            (ast-type-type (list
                   '()
-                  (node 'typeType.2
-                        (node 'classOrInterfaceType
-                              (node 'classType $1 $2 $3)))
-                  $4)
+                  (ast-type-base (list
+                        (ast-class-or-interface-type (list
+                              (ast-class-type (list $1 $2 $3))))))
+                  $4))
             $5
-            $6)]
+            $6))]
      [(primitiveType (* typeType.3) (? formalParameter.3) variableDeclaratorId)
-      (node 'formalParameter
+      (ast-formal-parameter (list
             '()
-            (node 'typeType '() (node 'typeType.2 $1) $2)
+            (ast-type-type (list '() (ast-type-base (list $1)) $2))
             $3
-            $4)]
-     [((* variableModifier) typeType (? formalParameter.3) variableDeclaratorId) (node 'formalParameter $1 $2 $3 $4)]]
+            $4))]
+     [((* variableModifier) typeType (? formalParameter.3) variableDeclaratorId) (ast-formal-parameter (list $1 $2 $3 $4))]]
     [lambdaLVTIList
      [((sep-by COMMA lambdaLVTIParameter)) $1]]
     [lambdaLVTIParameter
-     [((* variableModifier) VAR identifier) (node 'lambdaLVTIParameter $1 'VAR $3)]]
+     [((* variableModifier) VAR identifier) (ast-lambda-lvti-parameter (list $1 'VAR $3))]]
     [qualifiedName
      [((sep-by DOT identifier)) $1]]
     [literal
@@ -346,35 +337,35 @@
      [(FLOAT_LITERAL) (ast-float-literal $1)]
      [(HEX_FLOAT_LITERAL) (ast-float-literal $1)]]
     [altAnnotationQualifiedName
-     [((* altAnnotationQualifiedName.1) AT identifier) (node 'altAnnotationQualifiedName $1 'AT $3)]]
+     [((* altAnnotationQualifiedName.1) AT identifier) (ast-alt-annotation-qualified-name (list $1 'AT $3))]]
     [annotation
-     [(annotation.1 (? annotationFieldValues)) (node 'annotation $1 $2)]]
+     [(annotation.1 (? annotationFieldValues)) (ast-annotation (list $1 $2))]]
     [annotation.1
      [(AT qualifiedName) $2]]
     [annotationFieldValues
      [(LPAREN (? (sep-by COMMA annotationFieldValue)) RPAREN) $2]]
     [annotationFieldValue
-     [(identifier ASSIGN annotationValue) (node 'annotationFieldValue $1 'ASSIGN $3)]
-     [(annotationValue) (node 'annotationFieldValue $1)]]
+     [(identifier ASSIGN annotationValue) (ast-annotation-field-value (list $1 'ASSIGN $3))]
+     [(annotationValue) (ast-annotation-field-value (list $1))]]
     [annotationValue
-     [(expression) (node 'annotationValue $1)]
-     [(annotation) (node 'annotationValue $1)]
+     [(expression) (ast-annotation-value (list $1))]
+     [(annotation) (ast-annotation-value (list $1))]
      [(LBRACE (? (sep-by COMMA annotationValue)) (?->bool COMMA) RBRACE) $2]]
     [elementValue
-     [(expression) (node 'elementValue $1)]
-     [(annotation) (node 'elementValue $1)]
-     [(elementValueArrayInitializer) (node 'elementValue $1)]]
+     [(expression) (ast-element-value (list $1))]
+     [(annotation) (ast-element-value (list $1))]
+     [(elementValueArrayInitializer) (ast-element-value (list $1))]]
     [elementValueArrayInitializer
-     [(LBRACE (? (sep-by COMMA elementValue)) (?->bool COMMA) RBRACE) (node 'elementValueArrayInitializer 'LBRACE $2 $3 'RBRACE)]]
+     [(LBRACE (? (sep-by COMMA elementValue)) (?->bool COMMA) RBRACE) (ast-element-value-array-initializer (list 'LBRACE $2 $3 'RBRACE))]]
     [annotationTypeDeclaration
-     [(AT_INTERFACE identifier annotationTypeBody) (node 'annotationTypeDeclaration 'AT_INTERFACE $2 $3)]]
+     [(AT_INTERFACE identifier annotationTypeBody) (ast-annotation-type-declaration (list 'AT_INTERFACE $2 $3))]]
     [annotationTypeBody
-     [(LBRACE (* annotationTypeElementDeclaration) RBRACE) (node 'annotationTypeBody 'LBRACE $2 'RBRACE)]]
+     [(LBRACE (* annotationTypeElementDeclaration) RBRACE) (ast-annotation-type-body (list 'LBRACE $2 'RBRACE))]]
     [annotationTypeElementDeclaration
-     [((* modifier) annotationTypeElementRest) (node 'annotationTypeElementDeclaration $1 $2)]
+     [((* modifier) annotationTypeElementRest) (ast-annotation-type-element-declaration (list $1 $2))]
      [(SEMI) null]]
     [annotationTypeElementRest
-     [(typeType annotationMethodOrConstantRest SEMI) (node 'annotationTypeElementRest $1 $2 'SEMI)]
+     [(typeType annotationMethodOrConstantRest SEMI) (ast-annotation-type-element-rest (list $1 $2 'SEMI))]
      [(classDeclaration (?->bool SEMI)) $1]
      [(interfaceDeclaration (?->bool SEMI)) $1]
      [(enumDeclaration (?->bool SEMI)) $1]
@@ -384,26 +375,26 @@
      [(annotationMethodRest) $1]
      [(annotationConstantRest) $1]]
     [annotationMethodRest
-     [(identifier LPAREN RPAREN (? defaultValue)) (node 'annotationMethodRest $1 'LPAREN 'RPAREN $4)]]
+     [(identifier LPAREN RPAREN (? defaultValue)) (ast-annotation-method-rest (list $1 'LPAREN 'RPAREN $4))]]
     [annotationConstantRest
-     [(variableDeclarators) (node 'annotationConstantRest $1)]]
+     [(variableDeclarators) (ast-annotation-constant-rest (list $1))]]
     [defaultValue
-      [(DEFAULT elementValue) (node 'defaultValue 'DEFAULT $2)]]
+      [(DEFAULT elementValue) (ast-default-value (list 'DEFAULT $2))]]
     [moduleDeclaration
-     [((* annotation) (?->bool OPEN) MODULE qualifiedName LBRACE (* moduleDirective) RBRACE) (node 'moduleDeclaration $1 $2 'MODULE $4 'LBRACE $6 'RBRACE)]]
+     [((* annotation) (?->bool OPEN) MODULE qualifiedName LBRACE (* moduleDirective) RBRACE) (ast-module-declaration (list $1 $2 'MODULE $4 'LBRACE $6 'RBRACE))]]
     [moduleDirective
-     [(REQUIRES (* requiresModifier) qualifiedName SEMI) (node 'moduleDirective 'REQUIRES $2 $3 'SEMI)]
-     [(EXPORTS qualifiedName (? moduleDirective.3) SEMI) (node 'moduleDirective 'EXPORTS $2 $3 'SEMI)]
-     [(OPENS qualifiedName (? moduleDirective.3) SEMI) (node 'moduleDirective 'OPENS $2 $3 'SEMI)]
-     [(USES qualifiedName SEMI) (node 'moduleDirective 'USES $2 'SEMI)]
-     [(PROVIDES qualifiedName WITH (sep-by COMMA qualifiedName) SEMI) (node 'moduleDirective 'PROVIDES $2 'WITH $4 'SEMI)]]
+     [(REQUIRES (* requiresModifier) qualifiedName SEMI) (ast-module-directive (list 'REQUIRES $2 $3 'SEMI))]
+     [(EXPORTS qualifiedName (? moduleDirective.3) SEMI) (ast-module-directive (list 'EXPORTS $2 $3 'SEMI))]
+     [(OPENS qualifiedName (? moduleDirective.3) SEMI) (ast-module-directive (list 'OPENS $2 $3 'SEMI))]
+     [(USES qualifiedName SEMI) (ast-module-directive (list 'USES $2 'SEMI))]
+     [(PROVIDES qualifiedName WITH (sep-by COMMA qualifiedName) SEMI) (ast-module-directive (list 'PROVIDES $2 'WITH $4 'SEMI))]]
     [moduleDirective.3
-     [(TO (sep-by COMMA qualifiedName)) (node 'moduleDirective.3 'TO $2)]]
+     [(TO (sep-by COMMA qualifiedName)) (ast-module-directive-to (list 'TO $2))]]
     [requiresModifier
      [(TRANSITIVE) 'transitive]
      [(STATIC) 'static]]
     [recordDeclaration
-     [(RECORD identifier (? typeParameters) recordHeader (? recordDeclaration.5) recordBody) (node 'recordDeclaration 'RECORD $2 $3 $4 $5 $6)]]
+     [(RECORD identifier (? typeParameters) recordHeader (? recordDeclaration.5) recordBody) (ast-record-declaration (list 'RECORD $2 $3 $4 $5 $6))]]
     [recordDeclaration.5
      [(IMPLEMENTS typeList) $2]]
     [recordHeader
@@ -411,16 +402,16 @@
     [recordComponentList
      [((sep-by COMMA recordComponent)) $1]]
     [recordComponent
-     [((* annotation) typeType (? recordComponent.3) identifier) (node 'recordComponent $1 $2 $3 $4)]]
+     [((* annotation) typeType (? recordComponent.3) identifier) (ast-record-component (list $1 $2 $3 $4))]]
     [recordComponent.3
-     [((* annotation) ELLIPSIS) (node 'recordComponent.3 $1 'ELLIPSIS)]]
+     [((* annotation) ELLIPSIS) (ast-record-component-varargs (list $1 'ELLIPSIS))]]
     [recordBody
-     [(LBRACE (* recordBody.2) RBRACE) (node 'recordBody 'LBRACE $2 'RBRACE)]]
+     [(LBRACE (* recordBody.2) RBRACE) (ast-record-body (list 'LBRACE $2 'RBRACE))]]
     [recordBody.2
      [(classBodyDeclaration) $1]
      [(compactConstructorDeclaration) $1]]
     [block
-     [(LBRACE (* blockItem) RBRACE) (node 'block $2)]]
+     [(LBRACE (* blockItem) RBRACE) (ast-block (list $2))]]
     [blockItem
      [(block) $1]
      [(ABSTRACT) 'ABSTRACT]
@@ -550,40 +541,40 @@
      [(IDENTIFIER) $1]]
     [blockStatement
      [(VAR identifier ASSIGN expression SEMI)
-      (node 'blockStatement
-            (node 'localVariableDeclaration
+      (ast-block-statement (list
+            (ast-local-variable-declaration (list
                   '()
-                  (node 'localVariableDeclaration.2 'VAR $2 'ASSIGN $4)))]
+                  (ast-local-variable-declaration-rest (list 'VAR $2 'ASSIGN $4))))))]
      [(primitiveType variableDeclarators SEMI)
-      (node 'blockStatement
-            (node 'localVariableDeclaration
+      (ast-block-statement (list
+            (ast-local-variable-declaration (list
                   '()
-                  (node 'localVariableDeclaration.2
-                        (node 'typeType
+                  (ast-local-variable-declaration-rest (list
+                        (ast-type-type (list
                               '()
-                              (node 'typeType.2 $1)
-                              '())
-                        $2)))]
+                              (ast-type-base (list $1))
+                              '()))
+                        $2))))))]
      [(identifier (? typeArguments) (* classType.2) (* typeType.3) variableDeclarators SEMI)
-      (node 'blockStatement
-            (node 'localVariableDeclaration
+      (ast-block-statement (list
+            (ast-local-variable-declaration (list
                   '()
-                  (node 'localVariableDeclaration.2
-                        (node 'typeType
+                  (ast-local-variable-declaration-rest (list
+                        (ast-type-type (list
                               '()
-                              (node 'typeType.2
-                                    (node 'classOrInterfaceType
-                                          (node 'classType $1 $2 $3)))
-                              $4)
-                        $5)))]
+                              (ast-type-base (list
+                                    (ast-class-or-interface-type (list
+                                          (ast-class-type (list $1 $2 $3))))))
+                              $4))
+                        $5))))))]
      [(localVariableDeclaration SEMI) $1]
      [(localTypeDeclaration) $1]
      [(statement) $1]]
     [localVariableDeclaration
-     [((* variableModifier) localVariableDeclaration.2) (node 'localVariableDeclaration $1 $2)]]
+     [((* variableModifier) localVariableDeclaration.2) (ast-local-variable-declaration (list $1 $2))]]
     [localVariableDeclaration.2
-     [(VAR identifier ASSIGN expression) (node 'localVariableDeclaration.2 'VAR $2 'ASSIGN $4)]
-     [(typeType variableDeclarators) (node 'localVariableDeclaration.2 $1 $2)]]
+     [(VAR identifier ASSIGN expression) (ast-local-variable-declaration-rest (list 'VAR $2 'ASSIGN $4))]
+     [(typeType variableDeclarators) (ast-local-variable-declaration-rest (list $1 $2))]]
     [identifier
      [(IDENTIFIER) $1]
      [(MODULE) "module"]
@@ -616,7 +607,7 @@
      [(TRANSITIVE) "transitive"]
      [(SEALED) "sealed"]]
     [localTypeDeclaration
-     [((* classOrInterfaceModifier) localTypeDeclaration.2) (node 'localTypeDeclaration $1 $2)]]
+     [((* classOrInterfaceModifier) localTypeDeclaration.2) (ast-local-type-declaration (list $1 $2))]]
     [localTypeDeclaration.2
      [(classDeclaration) $1]
      [(interfaceDeclaration) $1]
@@ -624,103 +615,103 @@
      [(enumDeclaration) $1]]
     [statement
      [(block) $1] ;blockLabel = block
-     [(ASSERT expression (? statement.3/2) SEMI) (node 'statement 'ASSERT $2 $3 'SEMI)]
-     [(IF LPAREN expression RPAREN statement (? statement.6)) (node 'statement 'IF 'LPAREN $3 'RPAREN $5 $6)]
-     [(FOR LPAREN forControl RPAREN statement) (node 'statement 'FOR 'LPAREN $3 'RPAREN $5)]
-     [(WHILE LPAREN expression RPAREN statement) (node 'statement 'WHILE 'LPAREN $3 'RPAREN $5)]
-     [(DO statement WHILE LPAREN expression RPAREN SEMI) (node 'statement 'DO $2 'WHILE 'LPAREN $5 'RPAREN 'SEMI)]
-     [(TRY block statement.3/7) (node 'statement 'TRY $2 $3)]
-     [(TRY resourceSpecification block (* catchClause) (? finallyBlock)) (node 'statement 'TRY $2 $3 $4 $5)]
-     [(SWITCH LPAREN expression RPAREN LBRACE (* switchBlockStatementGroup) (* switchLabel) RBRACE) (node 'statement 'SWITCH 'LPAREN $3 'RPAREN 'LBRACE $6 $7 'RBRACE)]
-     [(SYNCHRONIZED LPAREN expression RPAREN block) (node 'statement 'SYNCHRONIZED 'LPAREN $3 'RPAREN $5)]
-     [(RETURN (? expression) SEMI) (node 'statement 'RETURN $2 'SEMI)]
-     [(THROW expression SEMI) (node 'statement 'THROW $2 'SEMI)]
-     [(BREAK (? identifier) SEMI) (node 'statement 'BREAK $2 'SEMI)]
-     [(CONTINUE (? identifier) SEMI) (node 'statement 'CONTINUE $2 'SEMI)]
-     [(YIELD (? expression) SEMI) (node 'statement 'YIELD $2 'SEMI)]
+     [(ASSERT expression (? statement.3/2) SEMI) (ast-statement (list 'ASSERT $2 $3 'SEMI))]
+     [(IF LPAREN expression RPAREN statement (? statement.6)) (ast-statement (list 'IF 'LPAREN $3 'RPAREN $5 $6))]
+     [(FOR LPAREN forControl RPAREN statement) (ast-statement (list 'FOR 'LPAREN $3 'RPAREN $5))]
+     [(WHILE LPAREN expression RPAREN statement) (ast-statement (list 'WHILE 'LPAREN $3 'RPAREN $5))]
+     [(DO statement WHILE LPAREN expression RPAREN SEMI) (ast-statement (list 'DO $2 'WHILE 'LPAREN $5 'RPAREN 'SEMI))]
+     [(TRY block statement.3/7) (ast-statement (list 'TRY $2 $3))]
+     [(TRY resourceSpecification block (* catchClause) (? finallyBlock)) (ast-statement (list 'TRY $2 $3 $4 $5))]
+     [(SWITCH LPAREN expression RPAREN LBRACE (* switchBlockStatementGroup) (* switchLabel) RBRACE) (ast-statement (list 'SWITCH 'LPAREN $3 'RPAREN 'LBRACE $6 $7 'RBRACE))]
+     [(SYNCHRONIZED LPAREN expression RPAREN block) (ast-statement (list 'SYNCHRONIZED 'LPAREN $3 'RPAREN $5))]
+     [(RETURN (? expression) SEMI) (ast-statement (list 'RETURN $2 'SEMI))]
+     [(THROW expression SEMI) (ast-statement (list 'THROW $2 'SEMI))]
+     [(BREAK (? identifier) SEMI) (ast-statement (list 'BREAK $2 'SEMI))]
+     [(CONTINUE (? identifier) SEMI) (ast-statement (list 'CONTINUE $2 'SEMI))]
+     [(YIELD (? expression) SEMI) (ast-statement (list 'YIELD $2 'SEMI))]
      [(SEMI) null]
-     [(expression SEMI) (node 'statement $1 'SEMI)] ;statementExpression = expression
-     [(switchExpression (?->bool SEMI)) (node 'statement $1 $2)]
-     [(identifier COLON statement) (node 'statement $1 'COLON $3)]] ;identifierLabel = identifier
+     [(expression SEMI) (ast-statement (list $1 'SEMI))] ;statementExpression = expression
+     [(switchExpression (?->bool SEMI)) (ast-statement (list $1 $2))]
+     [(identifier COLON statement) (ast-statement (list $1 'COLON $3))]] ;identifierLabel = identifier
     [statement.3/2
      [(COLON expression) $2]]
     [statement.6
      [(ELSE statement) $2]]
     [statement.3/7
-     [((+ catchClause) (? finallyBlock)) (node 'statement.3/7 $1 $2)]
-     [(finallyBlock) (node 'statement.3/7 $1)]]
+     [((+ catchClause) (? finallyBlock)) (ast-statement-try-rest (list $1 $2))]
+     [(finallyBlock) (ast-statement-try-rest (list $1))]]
     [catchClause
-     [(CATCH LPAREN (* variableModifier) catchType identifier RPAREN block) (node 'catchClause 'CATCH 'LPAREN $3 $4 $5 'RPAREN $7)]]
+     [(CATCH LPAREN (* variableModifier) catchType identifier RPAREN block) (ast-catch-clause (list 'CATCH 'LPAREN $3 $4 $5 'RPAREN $7))]]
     [catchType
      [((sep-by BITOR qualifiedName)) $1]]
     [finallyBlock
-     [(FINALLY block) (node 'finallyBlock 'FINALLY $2)]]
+     [(FINALLY block) (ast-finally-block (list 'FINALLY $2))]]
     [resourceSpecification
-     [(LPAREN resources (?->bool SEMI) RPAREN) (node 'resourceSpecification 'LPAREN $2 $3 'RPAREN)]]
+     [(LPAREN resources (?->bool SEMI) RPAREN) (ast-resource-specification (list 'LPAREN $2 $3 'RPAREN))]]
     [resources
      [((sep-by SEMI resource)) $1]]
     [resource
-     [((* variableModifier) classOrInterfaceType variableDeclaratorId ASSIGN expression) (node 'resource $1 $2 $3 'ASSIGN $5)]
-     [((* variableModifier) VAR identifier ASSIGN expression) (node 'resource $1 'VAR $3 'ASSIGN $5)]
-     [(qualifiedName) (node 'resource $1)]]
+     [((* variableModifier) classOrInterfaceType variableDeclaratorId ASSIGN expression) (ast-resource (list $1 $2 $3 'ASSIGN $5))]
+     [((* variableModifier) VAR identifier ASSIGN expression) (ast-resource (list $1 'VAR $3 'ASSIGN $5))]
+     [(qualifiedName) (ast-resource (list $1))]]
     [switchBlockStatementGroup
-     [((+ switchBlockStatementGroup.1) (+ blockStatement)) (node 'switchBlockStatementGroup $1 $2)]]
+     [((+ switchBlockStatementGroup.1) (+ blockStatement)) (ast-switch-block-statement-group (list $1 $2))]]
     [switchBlockStatementGroup.1
-     [(switchLabel COLON) (node 'switchBlockStatementGroup.1 $1 'COLON)]]
+     [(switchLabel COLON) (ast-switch-block-statement-group-label (list $1 'COLON))]]
     [switchLabel
-     [(CASE expression) (node 'switchLabel 'CASE $2)]
-     [(CASE IDENTIFIER) (node 'switchLabel 'CASE $2)]
-     [(CASE typeType identifier) (node 'switchLabel 'CASE $2 $3)]
+     [(CASE expression) (ast-switch-label (list 'CASE $2))]
+     [(CASE IDENTIFIER) (ast-switch-label (list 'CASE $2))]
+     [(CASE typeType identifier) (ast-switch-label (list 'CASE $2 $3))]
      [(DEFAULT) 'default]]
     [forControl
-     [(enhancedForControl) (node 'forControl $1)]
-     [((? forInit) SEMI (? expression) SEMI (? expressionList)) (node 'forControl $1 'SEMI $3 'SEMI $5)]]
+     [(enhancedForControl) (ast-for-control (list $1))]
+     [((? forInit) SEMI (? expression) SEMI (? expressionList)) (ast-for-control (list $1 'SEMI $3 'SEMI $5))]]
     [forInit
-     [(localVariableDeclaration) (node 'forInit $1)]
-     [(expressionList) (node 'forInit $1)]]
+     [(localVariableDeclaration) (ast-for-init (list $1))]
+     [(expressionList) (ast-for-init (list $1))]]
     [enhancedForControl
-     [((* variableModifier) typeType variableDeclaratorId COLON expression) (node 'enhancedForControl $1 $2 $3 'COLON $5)]
-     [((* variableModifier) VAR variableDeclaratorId COLON expression) (node 'enhancedForControl $1 'VAR $3 'COLON $5)]]
+     [((* variableModifier) typeType variableDeclaratorId COLON expression) (ast-enhanced-for-control (list $1 $2 $3 'COLON $5))]
+     [((* variableModifier) VAR variableDeclaratorId COLON expression) (ast-enhanced-for-control (list $1 'VAR $3 'COLON $5))]]
     [expressionList
      [((sep-by COMMA expression)) $1]]
     [methodCall
-     [(identifier arguments) (node 'methodCall $1 $2)]
-     [(THIS arguments) (node 'methodCall 'THIS $2)]
-     [(SUPER arguments) (node 'methodCall 'SUPER $2)]]
+     [(identifier arguments) (ast-method-call (list $1 $2))]
+     [(THIS arguments) (ast-method-call (list 'THIS $2))]
+     [(SUPER arguments) (ast-method-call (list 'SUPER $2))]]
     [expression
-     [(primary) (node 'expression $1)]
-     [(expression LBRACK expression RBRACK) (node 'expression $1 'LBRACK $3 'RBRACK)]
-     [(expression DOT identifier) (node 'expression $1 'DOT $3)]
-     [(expression DOT methodCall) (node 'expression $1 'DOT $3)]
-     [(expression DOT THIS) (node 'expression $1 'DOT 'THIS)]
-     [(expression DOT NEW (? nonWildcardTypeArguments) innerCreator) (node 'expression $1 'DOT 'NEW $4 $5)]
-     [(expression DOT SUPER superSuffix) (node 'expression $1 'DOT 'SUPER $4)]
-     [(expression DOT explicitGenericInvocation) (node 'expression $1 'DOT $3)]
-     [(methodCall) (node 'expression $1)]
-     [(expression COLONCOLON (? typeArguments) identifier) (node 'expression $1 'COLONCOLON $3 $4)]
-     [(typeType COLONCOLON (? typeArguments) identifier) (node 'expression $1 'COLONCOLON $3 $4)]
-     [(typeType COLONCOLON NEW) (node 'expression $1 'COLONCOLON 'NEW)]
-     [(classType COLONCOLON (? typeArguments) NEW) (node 'expression $1 'COLONCOLON $3 'NEW)]
-     [(switchExpression) (node 'expression $1)]
-     [(expression expression.18) (node 'expression $1 $2)] ;postfix
-     [(expression.20 expression) (node 'expression $1 $2)] ;prefix
-     [(LPAREN (* annotation) typeType (* expression.23) RPAREN expression) (node 'expression 'LPAREN $2 $3 $4 'RPAREN $6)] ;cast
-     [(NEW creator) (node 'expression 'NEW $2)]
-     [(expression expression.26 expression) (node 'expression $1 $2 $3)] ;bop */%
-     [(expression expression.27 expression) (node 'expression $1 $2 $3)] ;bop +-
-     [(expression expression.28 expression) (node 'expression $1 $2 $3)] ;bop << >> >>>
-     [(expression expression.29 expression) (node 'expression $1 $2 $3)] ;bop <= >= > <
-     [(expression INSTANCEOF typeType) (node 'expression $1 'INSTANCEOF $3)]
-     [(expression INSTANCEOF pattern) (node 'expression $1 'INSTANCEOF $3)]
-     [(expression expression.32 expression) (node 'expression $1 $2 $3)] ;bop == !=
-     [(expression BITAND expression) (node 'expression $1 'BITAND $3)]
-     [(expression CARET expression) (node 'expression $1 'CARET $3)]
-     [(expression BITOR expression) (node 'expression $1 'BITOR $3)]
-     [(expression AND expression) (node 'expression $1 'AND $3)]
-     [(expression OR expression) (node 'expression $1 'OR $3)]
-     [(expression QUESTION expression COLON expression) (node 'expression $1 'QUESTION $3 'COLON $5)]
-     [(expression expression.39 expression) (node 'expression $1 $2 $3)] ;bop assignment
-     [(lambdaExpression) (node 'expression $1)]]
+     [(primary) (ast-expression (list $1))]
+     [(expression LBRACK expression RBRACK) (ast-expression (list $1 'LBRACK $3 'RBRACK))]
+     [(expression DOT identifier) (ast-expression (list $1 'DOT $3))]
+     [(expression DOT methodCall) (ast-expression (list $1 'DOT $3))]
+     [(expression DOT THIS) (ast-expression (list $1 'DOT 'THIS))]
+     [(expression DOT NEW (? nonWildcardTypeArguments) innerCreator) (ast-expression (list $1 'DOT 'NEW $4 $5))]
+     [(expression DOT SUPER superSuffix) (ast-expression (list $1 'DOT 'SUPER $4))]
+     [(expression DOT explicitGenericInvocation) (ast-expression (list $1 'DOT $3))]
+     [(methodCall) (ast-expression (list $1))]
+     [(expression COLONCOLON (? typeArguments) identifier) (ast-expression (list $1 'COLONCOLON $3 $4))]
+     [(typeType COLONCOLON (? typeArguments) identifier) (ast-expression (list $1 'COLONCOLON $3 $4))]
+     [(typeType COLONCOLON NEW) (ast-expression (list $1 'COLONCOLON 'NEW))]
+     [(classType COLONCOLON (? typeArguments) NEW) (ast-expression (list $1 'COLONCOLON $3 'NEW))]
+     [(switchExpression) (ast-expression (list $1))]
+     [(expression expression.18) (ast-expression (list $1 $2))] ;postfix
+     [(expression.20 expression) (ast-expression (list $1 $2))] ;prefix
+     [(LPAREN (* annotation) typeType (* expression.23) RPAREN expression) (ast-expression (list 'LPAREN $2 $3 $4 'RPAREN $6))] ;cast
+     [(NEW creator) (ast-expression (list 'NEW $2))]
+     [(expression expression.26 expression) (ast-expression (list $1 $2 $3))] ;bop */%
+     [(expression expression.27 expression) (ast-expression (list $1 $2 $3))] ;bop +-
+     [(expression expression.28 expression) (ast-expression (list $1 $2 $3))] ;bop << >> >>>
+     [(expression expression.29 expression) (ast-expression (list $1 $2 $3))] ;bop <= >= > <
+     [(expression INSTANCEOF typeType) (ast-expression (list $1 'INSTANCEOF $3))]
+     [(expression INSTANCEOF pattern) (ast-expression (list $1 'INSTANCEOF $3))]
+     [(expression expression.32 expression) (ast-expression (list $1 $2 $3))] ;bop == !=
+     [(expression BITAND expression) (ast-expression (list $1 'BITAND $3))]
+     [(expression CARET expression) (ast-expression (list $1 'CARET $3))]
+     [(expression BITOR expression) (ast-expression (list $1 'BITOR $3))]
+     [(expression AND expression) (ast-expression (list $1 'AND $3))]
+     [(expression OR expression) (ast-expression (list $1 'OR $3))]
+     [(expression QUESTION expression COLON expression) (ast-expression (list $1 'QUESTION $3 'COLON $5))]
+     [(expression expression.39 expression) (ast-expression (list $1 $2 $3))] ;bop assignment
+     [(lambdaExpression) (ast-expression (list $1))]]
     [expression.18
      [(INC) 'inc]
      [(DEC) 'dec]]
@@ -732,7 +723,7 @@
      [(TILDE) 'bnot]
      [(BANG) 'lnot]]
     [expression.23
-     [(BITAND typeType) (node 'expression.23 'BITAND $2)]]
+     [(BITAND typeType) (ast-expression-intersection-type (list 'BITAND $2))]]
     [expression.26
      [(MUL) 'mul]
      [(DIV) 'div]
@@ -766,40 +757,40 @@
      [(LSHIFT_ASSIGN) 'lshift-assign]
      [(MOD_ASSIGN) 'mod-assign]]
     [pattern
-      [((* variableModifier) typeType (* annotation) variableDeclarators) (node 'pattern $1 $2 $3 $4)]
-      [(typeType LPAREN (? componentPatternList) RPAREN) (node 'pattern $1 'LPAREN $3 'RPAREN)]]
+      [((* variableModifier) typeType (* annotation) variableDeclarators) (ast-pattern (list $1 $2 $3 $4))]
+      [(typeType LPAREN (? componentPatternList) RPAREN) (ast-pattern (list $1 'LPAREN $3 'RPAREN))]]
     [componentPatternList
      [((sep-by COMMA componentPattern)) $1]]
     [componentPattern
-     [(pattern) (node 'componentPattern $1)]]
+     [(pattern) (ast-component-pattern (list $1))]]
     [lambdaExpression
-     [(lambdaParameters ARROW lambdaBody) (node 'lambdaExpression $1 'ARROW $3)]]
+     [(lambdaParameters ARROW lambdaBody) (ast-lambda-expression (list $1 'ARROW $3))]]
     [lambdaParameters
-     [(identifier) (node 'lambdaParameters $1)]
-     [(LPAREN (? formalParameterList) RPAREN) (node 'lambdaParameters 'LPAREN $2 'RPAREN)]
-     [(LPAREN (sep-by COMMA identifier) RPAREN) (node 'lambdaParameters 'LPAREN $2 'RPAREN)]
-     [(LPAREN (? lambdaLVTIList) RPAREN) (node 'lambdaParameters 'LPAREN $2 'RPAREN)]]
+     [(identifier) (ast-lambda-parameters (list $1))]
+     [(LPAREN (? formalParameterList) RPAREN) (ast-lambda-parameters (list 'LPAREN $2 'RPAREN))]
+     [(LPAREN (sep-by COMMA identifier) RPAREN) (ast-lambda-parameters (list 'LPAREN $2 'RPAREN))]
+     [(LPAREN (? lambdaLVTIList) RPAREN) (ast-lambda-parameters (list 'LPAREN $2 'RPAREN))]]
     [lambdaBody
-     [(expression) (node 'lambdaBody $1)]
-     [(block) (node 'lambdaBody $1)]]
+     [(expression) (ast-lambda-body (list $1))]
+     [(block) (ast-lambda-body (list $1))]]
     [primary
-     [(LPAREN expression RPAREN) (node 'primary 'LPAREN $2 'RPAREN)]
+     [(LPAREN expression RPAREN) (ast-primary (list 'LPAREN $2 'RPAREN))]
      [(THIS) 'this]
      [(SUPER) 'super]
-     [(literal) (node 'primary $1)]
-     [(identifier) (node 'primary $1)]
-     [(typeTypeOrVoid DOT CLASS) (node 'primary $1 'DOT 'CLASS)]
-     [(nonWildcardTypeArguments primary.7) (node 'primary $1 $2)]]
+     [(literal) (ast-primary (list $1))]
+     [(identifier) (ast-primary (list $1))]
+     [(typeTypeOrVoid DOT CLASS) (ast-primary (list $1 'DOT 'CLASS))]
+     [(nonWildcardTypeArguments primary.7) (ast-primary (list $1 $2))]]
     [primary.7
-     [(explicitGenericInvocationSuffix) (node 'primary.7 $1)]
-     [(THIS arguments) (node 'primary.7 'THIS $2)]]
+     [(explicitGenericInvocationSuffix) (ast-primary-generic-suffix (list $1))]
+     [(THIS arguments) (ast-primary-generic-suffix (list 'THIS $2))]]
     [switchExpression
-     [(SWITCH LPAREN expression RPAREN LBRACE (* switchLabeledRule) RBRACE) (node 'switchExpression 'SWITCH 'LPAREN $3 'RPAREN 'LBRACE $6 'RBRACE)]]
+     [(SWITCH LPAREN expression RPAREN LBRACE (* switchLabeledRule) RBRACE) (ast-switch-expression (list 'SWITCH 'LPAREN $3 'RPAREN 'LBRACE $6 'RBRACE))]]
     [switchLabeledRule
-     [(CASE expressionList switchLabeledRule.3 switchRuleOutcome) (node 'switchLabeledRule 'CASE $2 $3 $4)]
-     [(CASE NULL_LITERAL switchLabeledRule.2.2 switchLabeledRule.3 switchRuleOutcome) (node 'switchLabeledRule 'CASE 'NULL_LITERAL $3 $4 $5)]
-     [(CASE (+ casePattern) (? guard) switchLabeledRule.3 switchRuleOutcome) (node 'switchLabeledRule 'CASE $2 $3 $4 $5)]
-     [(DEFAULT switchLabeledRule.3 switchRuleOutcome) (node 'switchLabeledRule 'DEFAULT $2 $3)]]
+     [(CASE expressionList switchLabeledRule.3 switchRuleOutcome) (ast-switch-labeled-rule (list 'CASE $2 $3 $4))]
+     [(CASE NULL_LITERAL switchLabeledRule.2.2 switchLabeledRule.3 switchRuleOutcome) (ast-switch-labeled-rule (list 'CASE 'NULL_LITERAL $3 $4 $5))]
+     [(CASE (+ casePattern) (? guard) switchLabeledRule.3 switchRuleOutcome) (ast-switch-labeled-rule (list 'CASE $2 $3 $4 $5))]
+     [(DEFAULT switchLabeledRule.3 switchRuleOutcome) (ast-switch-labeled-rule (list 'DEFAULT $2 $3))]]
     [switchLabeledRule.2.2
      [() #f]
      [(COMMA DEFAULT) #t]]
@@ -807,53 +798,53 @@
      [(ARROW) 'arrow]
      [(COLON) 'colon]]
     [guard
-     [(WHEN expression) (node 'guard 'WHEN $2)]]
+     [(WHEN expression) (ast-guard (list 'WHEN $2))]]
     [casePattern
-     [(pattern) (node 'casePattern $1)]]
+     [(pattern) (ast-case-pattern (list $1))]]
     [switchRuleOutcome
-     [(block) (node 'switchRuleOutcome $1)]
-     [((* blockStatement)) (node 'switchRuleOutcome $1)]]
+     [(block) (ast-switch-rule-outcome (list $1))]
+     [((* blockStatement)) (ast-switch-rule-outcome (list $1))]]
     [classOrInterfaceType
-     [(classType) (node 'classOrInterfaceType $1)]]
+     [(classType) (ast-class-or-interface-type (list $1))]]
     [creator
-     [(createdName creatorRest) (node 'creator $1 $2)]
-     [(nonWildcardTypeArguments createdName classCreatorRest) (node 'creator $1 $2 $3)]]
+     [(createdName creatorRest) (ast-creator (list $1 $2))]
+     [(nonWildcardTypeArguments createdName classCreatorRest) (ast-creator (list $1 $2 $3))]]
     [creatorRest
-     [(classCreatorRest) (node 'creatorRest $1)]
-     [(arrayCreatorRest) (node 'creatorRest $1)]]
+     [(classCreatorRest) (ast-creator-rest (list $1))]
+     [(arrayCreatorRest) (ast-creator-rest (list $1))]]
     [createdName
-     [(identifier (? typeArgumentsOrDiamond) (* createdName.3)) (node 'createdName $1 $2 $3)]
-     [(primitiveType) (node 'createdName $1)]]
+     [(identifier (? typeArgumentsOrDiamond) (* createdName.3)) (ast-created-name (list $1 $2 $3))]
+     [(primitiveType) (ast-created-name (list $1))]]
     [createdName.3
-     [(DOT identifier (? typeArgumentsOrDiamond)) (node 'createdName.3 'DOT $2 $3)]]
+     [(DOT identifier (? typeArgumentsOrDiamond)) (ast-created-name-suffix (list 'DOT $2 $3))]]
     [innerCreator
-     [(identifier (? nonWildcardTypeArgumentsOrDiamond) classCreatorRest) (node 'innerCreator $1 $2 $3)]]
+     [(identifier (? nonWildcardTypeArgumentsOrDiamond) classCreatorRest) (ast-inner-creator (list $1 $2 $3))]]
     [arrayCreatorRest
-     [((+ brackets) arrayInitializer) (node 'arrayCreatorRest $1 $2)]
-     [((+ arrayCreatorRest.2) (* brackets)) (node 'arrayCreatorRest $1 $2)]]
+     [((+ brackets) arrayInitializer) (ast-array-creator-rest (list $1 $2))]
+     [((+ arrayCreatorRest.2) (* brackets)) (ast-array-creator-rest (list $1 $2))]]
     [arrayCreatorRest.2
-     [(LBRACK expression RBRACK) (node 'arrayCreatorRest.2 'LBRACK $2 'RBRACK)]]
+     [(LBRACK expression RBRACK) (ast-array-creator-rest-sized-dimension (list 'LBRACK $2 'RBRACK))]]
     [classCreatorRest
-     [(arguments (? classBody)) (node 'classCreatorRest $1 $2)]]
+     [(arguments (? classBody)) (ast-class-creator-rest (list $1 $2))]]
     [explicitGenericInvocation
-     [(nonWildcardTypeArguments explicitGenericInvocationSuffix) (node 'explicitGenericInvocation $1 $2)]]
+     [(nonWildcardTypeArguments explicitGenericInvocationSuffix) (ast-explicit-generic-invocation (list $1 $2))]]
     [typeArgumentsOrDiamond
-     [(LT GT) (node 'typeArgumentsOrDiamond 'LT 'GT)]
-     [(typeArguments) (node 'typeArgumentsOrDiamond $1)]]
+     [(LT GT) (ast-type-arguments-or-diamond (list 'LT 'GT))]
+     [(typeArguments) (ast-type-arguments-or-diamond (list $1))]]
     [nonWildcardTypeArgumentsOrDiamond
-     [(LT GT) (node 'nonWildcardTypeArgumentsOrDiamond 'LT 'GT)]
-     [(nonWildcardTypeArguments) (node 'nonWildcardTypeArgumentsOrDiamond $1)]]
+     [(LT GT) (ast-non-wildcard-type-arguments-or-diamond (list 'LT 'GT))]
+     [(nonWildcardTypeArguments) (ast-non-wildcard-type-arguments-or-diamond (list $1))]]
     [nonWildcardTypeArguments
-     [(LT typeList GT) (node 'nonWildcardTypeArguments 'LT $2 'GT)]]
+     [(LT typeList GT) (ast-non-wildcard-type-arguments (list 'LT $2 'GT))]]
     [typeList
      [((sep-by COMMA typeType)) $1]]
     [typeType
-     [((* annotation) typeType.2 (* typeType.3)) (node 'typeType $1 $2 $3)]]
+     [((* annotation) typeType.2 (* typeType.3)) (ast-type-type (list $1 $2 $3))]]
     [typeType.2
-     [(classOrInterfaceType) (node 'typeType.2 $1)]
-     [(primitiveType) (node 'typeType.2 $1)]]
+     [(classOrInterfaceType) (ast-type-base (list $1))]
+     [(primitiveType) (ast-type-base (list $1))]]
     [typeType.3
-     [((* annotation) LBRACK RBRACK) (node 'typeType.3 $1 'LBRACK 'RBRACK)]]
+     [((* annotation) LBRACK RBRACK) (ast-type-array-suffix (list $1 'LBRACK 'RBRACK))]]
     [primitiveType
      [(BOOLEAN) 'boolean]
      [(CHAR) 'char]
@@ -867,21 +858,21 @@
      [(LT (sep-by COMMA typeArgument) GT) $2]
      [(LT typeArgumentWithClose) (list $2)]]
     [typeArgumentWithClose
-     [(typeType GT) (node 'typeArgumentWithClose $1 'GT)]]
+     [(typeType GT) (ast-type-argument-with-close (list $1 'GT))]]
     [superSuffix
-     [(arguments) (node 'superSuffix $1)]
-     [(DOT (? typeArguments) identifier (? arguments)) (node 'superSuffix 'DOT $2 $3 $4)]]
+     [(arguments) (ast-super-suffix (list $1))]
+     [(DOT (? typeArguments) identifier (? arguments)) (ast-super-suffix (list 'DOT $2 $3 $4))]]
     [explicitGenericInvocationSuffix
-     [(SUPER superSuffix) (node 'explicitGenericInvocationSuffix 'SUPER $2)]
-     [(identifier arguments) (node 'explicitGenericInvocationSuffix $1 $2)]]
+     [(SUPER superSuffix) (ast-explicit-generic-invocation-suffix (list 'SUPER $2))]
+     [(identifier arguments) (ast-explicit-generic-invocation-suffix (list $1 $2))]]
     [arguments
      [(LPAREN (? expressionList) RPAREN) $2]]
     [formalParameter.3
-     [((* annotation) ELLIPSIS) (node 'formalParameter.3 $1 'ELLIPSIS)]]
+     [((* annotation) ELLIPSIS) (ast-formal-parameter-varargs (list $1 'ELLIPSIS))]]
     [enumDeclaration.3
-     [(IMPLEMENTS typeList) (node 'enumDeclaration.3 'IMPLEMENTS $2)]]
+     [(IMPLEMENTS typeList) (ast-enum-declaration-implements (list 'IMPLEMENTS $2))]]
     [altAnnotationQualifiedName.1
-     [(identifier DOT) (node 'altAnnotationQualifiedName.1 $1 'DOT)]]]))
+     [(identifier DOT) (ast-alt-annotation-qualified-name-prefix (list $1 'DOT))]]]))
 
 (define (parse-java-code input)
   (define port (open-input-string input))
