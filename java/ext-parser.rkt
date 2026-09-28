@@ -39,9 +39,15 @@
        (map (lambda (x) (subst-symbols x param-map group-nt-map)) item)]
       [else item]))
 
+  (define (subst-production-tail tail param-map group-nt-map)
+    (for/list ([part (in-list tail)])
+      (match part
+        [`(prec ,sym) `(prec ,(subst-symbols sym param-map group-nt-map))]
+        [_ part])))
+
   ;; --- Grammar operator infrastructure ---
 
-  (struct production-defn (rhs-items action) #:transparent)
+  (struct production-defn (rhs-items tail) #:transparent)
   (struct named-group (name productions) #:transparent)
   (struct symbol-fn-defn (params groups) #:transparent)
 
@@ -55,7 +61,7 @@
 
   ;; --- Grammar transformation ---
 
-  ;; triple = (list lhs rhs action)
+  ;; triple = (list lhs rhs tail)
   ;; expr-stx is a syntax object; when it's a list starting with an identifier,
   ;; we look it up via syntax-local-value for lexical scoping.
   (define (lower expr-stx defined-lhs)
@@ -101,13 +107,17 @@
                      (define resolved-rhs
                        (for/list ([item (production-defn-rhs-items p)])
                          (subst-symbols item param-map group-nt-map)))
-                     (list nt resolved-rhs (production-defn-action p))))))
+                     (define resolved-tail
+                       (subst-production-tail (production-defn-tail p)
+                                             param-map
+                                             group-nt-map))
+                     (list nt resolved-rhs resolved-tail)))))
        ;; Now lower any nested operator calls in the resolved RHS items
        (define all-triples (append (reverse extras-rev) new-triples))
        (define final-triples
          (for/fold ([acc '()])
                    ([triple all-triples])
-           (match-define (list nt rhs action) triple)
+           (match-define (list nt rhs tail) triple)
            (define-values (roots-rev extras-rev)
              (for/fold ([roots-rev '()] [extras-rev '()])
                        ([item rhs])
@@ -117,7 +127,7 @@
                    (values (cons item roots-rev) extras-rev))))
            (define roots (reverse roots-rev))
            (append (reverse extras-rev)
-                   (cons (list nt roots action) acc))))
+                   (cons (list nt roots tail) acc))))
        (values entry-nt (reverse final-triples))]
       [(? symbol?)
        (values expr '())]
@@ -130,12 +140,12 @@
     (define rules-by-lhs (make-hash))
     (define seen-by-lhs (make-hash))
     (for ([t triples])
-      (match-define (list lhs rhs action) t)
+      (match-define (list lhs rhs tail) t)
       (unless (hash-has-key? rules-by-lhs lhs)
         (set! order-rev (cons lhs order-rev))
         (hash-set! rules-by-lhs lhs '())
         (hash-set! seen-by-lhs lhs (make-hash)))
-      (define candidate (list rhs action))
+      (define candidate (list rhs tail))
       (define seen (hash-ref seen-by-lhs lhs))
       (unless (hash-has-key? seen candidate)
         (hash-set! seen candidate #t)
@@ -145,8 +155,8 @@
       (datum->syntax/stx loc-stx
                          `(,lhs
                            ,@(for/list ([ra (reverse (hash-ref rules-by-lhs lhs))])
-                               (match-define (list rhs action) ra)
-                               `(,(if (null? rhs) '() rhs) ,action))))))
+                               (match-define (list rhs tail) ra)
+                               `(,(if (null? rhs) '() rhs) ,@tail))))))
 
   (define (collect-defined-lhs rules-datum)
     (remove-duplicates
@@ -215,18 +225,18 @@
 
 (define-syntax (define-grammar-operator stx)
   (syntax-parse stx
-    [(_ (op:id param:id ...) [group-name:id [rhs action] ...] ...)
+    [(_ (op:id param:id ...) [group-name:id [rhs tail ...+] ...] ...)
      (define param-syms (map syntax-e (syntax->list #'(param ...))))
      (define group-names (map syntax-e (syntax->list #'(group-name ...))))
      (define groups
        (for/list ([gn group-names]
                   [rhs-stxs (syntax->list #'((rhs ...) ...))]
-                  [act-stxs (syntax->list #'((action ...) ...))])
+                  [tail-stxs (syntax->list #'(((tail ...) ...) ...))])
          (define prods
            (for/list ([rhs-stx (syntax->list rhs-stxs)]
-                      [act-stx (syntax->list act-stxs)])
+                      [tail-stx (syntax->list tail-stxs)])
              (list (syntax->datum rhs-stx)
-                   (syntax->datum act-stx))))
+                   (syntax->datum tail-stx))))
          (list gn prods)))
      #`(define-syntax #,(grammar-op-id #'op)
          (grammar-operator-info
@@ -248,7 +258,7 @@
 (provide ext-parser define-grammar-operator)
 
 (module+ test
-  (require racket/pretty)
+  (require rackunit)
   (define-tokens value-tokens (NUM))
   (define-empty-tokens op-tokens (PLUS LPAREN RPAREN EOF))
   (define-grammar-operator (? s)
@@ -263,31 +273,65 @@
     [main
      [(s) (cons $1 '())]
      [(s main) (cons $1 $2)]])
-  (pretty-display (+ 1 2))
-  (pretty-display
-   (syntax->datum
-    (expand-once
-     #'(ext-parser
-        [start expr]
-        [end EOF]
-        [error (lambda args (error 'my-parser (format "parse error: ~s" args)))]
-        [src-pos]
-        [tokens value-tokens op-tokens]
-        [grammar
-         [expr
-          [(term) $1]
-          [((? NUM)) $1]]
-         [term
-          [((? NUM) (* LPAREN) (+ RPAREN)) (list $1 $2 $3)]]]))))
-  (pretty-display
-   (syntax->datum
-    (expand-once
-     #'(ext-parser
-        [start expr]
-        [end EOF]
-        [error (lambda args (error 'my-parser (format "parse error: ~s" args)))]
-        [src-pos]
-        [tokens value-tokens op-tokens]
-        [grammar
-         [expr
-          [((? (* NUM))) $1]]])))))
+  (define-grammar-operator (*-prec-test s precedence)
+    [_main
+     [() (prec precedence) '()]
+     [(s _main) (cons $1 $2)]])
+
+  (define (expanded-grammar stx)
+    (for/first ([clause (in-list (cdr (syntax->datum (expand-once stx))))]
+                #:when (and (pair? clause) (eq? (car clause) 'grammar)))
+      clause))
+
+  (check-equal?
+   (expanded-grammar
+    #'(ext-parser
+       [start expr]
+       [end EOF]
+       [error (lambda args (error 'my-parser (format "parse error: ~s" args)))]
+       [src-pos]
+       [tokens value-tokens op-tokens]
+       [grammar
+        [expr
+         [(term) $1]
+         [((? NUM)) $1]]
+        [term
+         [((? NUM) (* LPAREN) (+ RPAREN)) (list $1 $2 $3)]]]))
+   '(grammar
+     (expr ((term) $1) ((__ext_0) $1))
+     (term ((__ext_0 __ext_1 __ext_2) (list $1 $2 $3)))
+     (__ext_0 (() '()) ((NUM) $1))
+     (__ext_1 (() '()) ((LPAREN __ext_1) (cons $1 $2)))
+     (__ext_2 ((RPAREN) (cons $1 '())) ((RPAREN __ext_2) (cons $1 $2)))))
+
+  (check-equal?
+   (expanded-grammar
+    #'(ext-parser
+       [start expr]
+       [end EOF]
+       [error (lambda args (error 'my-parser (format "parse error: ~s" args)))]
+       [src-pos]
+       [tokens value-tokens op-tokens]
+       [grammar
+        [expr
+         [((? (* NUM))) $1]]]))
+   '(grammar
+     (expr ((__ext_1) $1))
+     (__ext_0 (() '()) ((NUM __ext_0) (cons $1 $2)))
+     (__ext_1 (() '()) ((__ext_0) $1))))
+
+  (check-equal?
+   (expanded-grammar
+    #'(ext-parser
+       [start expr]
+       [end EOF]
+       [error (lambda args (error 'my-parser (format "parse error: ~s" args)))]
+       [src-pos]
+       [tokens value-tokens op-tokens]
+       [precs (left PLUS)]
+       [grammar
+        [expr
+         [((*-prec-test NUM PLUS)) $1]]]))
+   '(grammar
+     (expr ((__ext_0) $1))
+     (__ext_0 (() (prec PLUS) '()) ((NUM __ext_0) (cons $1 $2))))))

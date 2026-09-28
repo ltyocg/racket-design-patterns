@@ -24,384 +24,446 @@
         (loop)
         tok)))
 
-(define (make-next-significant-token port)
-  (define pending-tokens '())
-  (define contextual-package-token-values
-    '([MODULE . "module"]
-      [OPEN . "open"]
-      [REQUIRES . "requires"]
-      [EXPORTS . "exports"]
-      [OPENS . "opens"]
-      [TO . "to"]
-      [USES . "uses"]
-      [PROVIDES . "provides"]
-      [WHEN . "when"]
-      [WITH . "with"]
-      [TRANSITIVE . "transitive"]
-      [YIELD . "yield"]
-      [SEALED . "sealed"]
-      [PERMITS . "permits"]
-      [RECORD . "record"]
-      [VAR . "var"]))
-  (define identifier-token-names
-    '(IDENTIFIER MODULE OPEN REQUIRES EXPORTS OPENS TO USES PROVIDES
-                 WHEN WITH TRANSITIVE YIELD SEALED PERMITS RECORD VAR))
-  (define expression-start-token-names
-    '(IDENTIFIER MODULE OPEN REQUIRES EXPORTS OPENS TO USES PROVIDES
-                 WHEN WITH TRANSITIVE YIELD SEALED PERMITS RECORD VAR
-                 THIS SUPER NEW LPAREN DECIMAL_LITERAL HEX_LITERAL OCT_LITERAL
-                 BINARY_LITERAL FLOAT_LITERAL HEX_FLOAT_LITERAL BOOL_LITERAL
-                 CHAR_LITERAL STRING_LITERAL TEXT_BLOCK NULL_LITERAL ADD SUB
-                 INC DEC TILDE BANG SWITCH))
-  (define cast-lookahead-blockers
-    '(IF WHILE FOR SWITCH SYNCHRONIZED))
-  (define previous-emitted-token-name #f)
-  (define last-emitted-token-name #f)
-  (define (read-significant-token)
-    (if (null? pending-tokens)
-        (next-significant-token port)
-        (let ([tok (car pending-tokens)])
-          (set! pending-tokens (cdr pending-tokens))
-          tok)))
-  (define (unread-significant-token tok)
-    (set! pending-tokens (cons tok pending-tokens)))
-  (define (retag-token tok name end-tok)
-    (make-position-token name
-                         (position-token-start-pos tok)
-                         (position-token-end-pos end-tok)))
-  (define (retag-value-token tok name)
-    (make-position-token (make-token name (token-value (position-token-token tok)))
-                         (position-token-start-pos tok)
-                         (position-token-end-pos tok)))
-  (define (token-name-of tok)
-    (token-name (position-token-token tok)))
-  (define (identifier-token? tok)
-    (memq (token-name-of tok) identifier-token-names))
-  (define (expression-start-token? tok)
-    (memq (token-name-of tok) expression-start-token-names))
-  (define (declaration-delimiter-token? tok)
-    (memq (token-name-of tok) '(ASSIGN COMMA SEMI)))
-  (define (restore-read-tokens read-tokens-rev)
-    (for ([read-tok (in-list read-tokens-rev)])
-      (unread-significant-token read-tok)))
-  (define (matching-gt-before-expression-boundary?)
-    (let loop ([depth 0] [read-tokens-rev '()])
-      (define lookahead-tok (read-significant-token))
-      (define lookahead-name (token-name-of lookahead-tok))
-      (define next-read-tokens-rev (cons lookahead-tok read-tokens-rev))
-      (cond
-        [(eq? lookahead-name 'EOF)
-         (restore-read-tokens next-read-tokens-rev)
-         #f]
-        [(and (zero? depth)
-              (memq lookahead-name '(RPAREN SEMI ASSIGN COLON ARROW LBRACE RBRACE)))
-         (restore-read-tokens next-read-tokens-rev)
-         #f]
-        [(eq? lookahead-name 'LT)
-         (loop (add1 depth) next-read-tokens-rev)]
-        [(and (eq? lookahead-name 'GT) (positive? depth))
-         (loop (sub1 depth) next-read-tokens-rev)]
-        [(eq? lookahead-name 'GT)
-         (restore-read-tokens next-read-tokens-rev)
-         #t]
-        [(and (eq? lookahead-name 'GT_SINGLE) (positive? depth))
-         (loop (sub1 depth) next-read-tokens-rev)]
-        [(and (eq? lookahead-name 'GT_SINGLE) (zero? depth))
-         (restore-read-tokens next-read-tokens-rev)
-         #t]
-        [else
-         (loop depth next-read-tokens-rev)])))
-  (define (primitive-token-value token-value)
-    (case token-value
-      [(BOOLEAN) 'boolean]
-      [(CHAR) 'char]
-      [(BYTE) 'byte]
-      [(SHORT) 'short]
-      [(INT) 'int]
-      [(LONG) 'long]
-      [(FLOAT) 'float]
-      [(DOUBLE) 'double]
-      [else #f]))
-  (define (retag-primitive-token tok token-name primitive-value)
-    (make-position-token (make-token token-name primitive-value)
-                         (position-token-start-pos tok)
-                         (position-token-end-pos tok)))
-  (define (for-primitive-token-name)
-    (define maybe-name-tok (read-significant-token))
-    (define delimiter-tok
-      (cond
-        [(eq? (token-name-of maybe-name-tok) 'LBRACK)
-         (define maybe-rbrack-tok (read-significant-token))
-         (define maybe-array-name-tok (read-significant-token))
-         (define maybe-delimiter-tok (read-significant-token))
-         (unread-significant-token maybe-delimiter-tok)
-         (unread-significant-token maybe-array-name-tok)
-         (unread-significant-token maybe-rbrack-tok)
-         (unread-significant-token maybe-name-tok)
-         maybe-delimiter-tok]
-        [else
-         (define maybe-delimiter-tok (read-significant-token))
-         (unread-significant-token maybe-delimiter-tok)
-         (unread-significant-token maybe-name-tok)
-         maybe-delimiter-tok]))
-    (if (eq? (token-name-of delimiter-tok) 'COLON)
-        'PRIMITIVE_ENHANCED
-        'PRIMITIVE_DECL))
-  (define (skip-balanced-after-lparen read-tokens-rev)
-    (let loop ([depth 1] [read-tokens-rev read-tokens-rev])
-      (define tok (read-significant-token))
-      (define name (token-name-of tok))
-      (define next-read-tokens-rev (cons tok read-tokens-rev))
-      (cond
-        [(eq? name 'EOF) next-read-tokens-rev]
-        [(eq? name 'LPAREN) (loop (add1 depth) next-read-tokens-rev)]
-        [(and (eq? name 'RPAREN) (= depth 1)) next-read-tokens-rev]
-        [(eq? name 'RPAREN) (loop (sub1 depth) next-read-tokens-rev)]
-        [else (loop depth next-read-tokens-rev)])))
-  (define (read-annotation-tail read-tokens-rev)
-    (define name-tok (read-significant-token))
-    (let loop ([read-tokens-rev (cons name-tok read-tokens-rev)])
-      (define maybe-tail-tok (read-significant-token))
-      (define maybe-tail-name (token-name-of maybe-tail-tok))
-      (define next-read-tokens-rev (cons maybe-tail-tok read-tokens-rev))
-      (cond
-        [(eq? maybe-tail-name 'DOT)
-         (define segment-tok (read-significant-token))
-         (loop (cons segment-tok next-read-tokens-rev))]
-        [(eq? maybe-tail-name 'LPAREN)
-         (skip-balanced-after-lparen next-read-tokens-rev)]
-        [else
-         (unread-significant-token maybe-tail-tok)
-         read-tokens-rev])))
-  (define (varargs-annotation-lookahead?)
-    (let loop ([read-tokens-rev '()])
-      (define after-annotation-rev (read-annotation-tail read-tokens-rev))
-      (define next-tok (read-significant-token))
-      (define next-name (token-name-of next-tok))
-      (define next-read-tokens-rev (cons next-tok after-annotation-rev))
-      (cond
-        [(eq? next-name 'ELLIPSIS)
-         (restore-read-tokens next-read-tokens-rev)
-         #t]
-        [(eq? next-name 'AT)
-         (loop next-read-tokens-rev)]
-        [else
-         (restore-read-tokens next-read-tokens-rev)
-         #f])))
-  (define (consume-through-ellipsis!)
-    (let loop ([last-tok #f])
-      (define tok (read-significant-token))
-      (if (or (eq? (token-name-of tok) 'ELLIPSIS)
-              (eq? (token-name-of tok) 'EOF))
-          tok
-          (loop tok))))
-  (define (skip-current-annotation-before-type)
-    (define annotation-tokens-rev (read-annotation-tail '()))
-    (define next-tok (read-significant-token))
+(struct token-context (port
+                       [pending #:mutable]
+                       [previous #:mutable]
+                       [last #:mutable]))
+
+(define contextual-keyword-token-values
+  '([MODULE . "module"]
+    [OPEN . "open"]
+    [REQUIRES . "requires"]
+    [EXPORTS . "exports"]
+    [OPENS . "opens"]
+    [TO . "to"]
+    [USES . "uses"]
+    [PROVIDES . "provides"]
+    [WHEN . "when"]
+    [WITH . "with"]
+    [TRANSITIVE . "transitive"]
+    [YIELD . "yield"]
+    [SEALED . "sealed"]
+    [PERMITS . "permits"]
+    [RECORD . "record"]
+    [VAR . "var"]))
+
+(define identifier-token-names
+  '(IDENTIFIER MODULE OPEN REQUIRES EXPORTS OPENS TO USES PROVIDES
+               WHEN WITH TRANSITIVE YIELD SEALED PERMITS RECORD VAR))
+
+(define expression-start-token-names
+  '(IDENTIFIER MODULE OPEN REQUIRES EXPORTS OPENS TO USES PROVIDES
+               WHEN WITH TRANSITIVE YIELD SEALED PERMITS RECORD VAR
+               THIS SUPER NEW LPAREN DECIMAL_LITERAL HEX_LITERAL OCT_LITERAL
+               BINARY_LITERAL FLOAT_LITERAL HEX_FLOAT_LITERAL BOOL_LITERAL
+               CHAR_LITERAL STRING_LITERAL TEXT_BLOCK NULL_LITERAL ADD SUB
+               INC DEC TILDE BANG SWITCH))
+
+(define cast-lookahead-blockers
+  '(IF WHILE FOR SWITCH SYNCHRONIZED))
+
+(define (context-read-token ctx)
+  (define pending (token-context-pending ctx))
+  (if (null? pending)
+      (next-significant-token (token-context-port ctx))
+      (let ([tok (car pending)])
+        (set-token-context-pending! ctx (cdr pending))
+        tok)))
+
+(define (context-unread-token! ctx tok)
+  (set-token-context-pending! ctx (cons tok (token-context-pending ctx))))
+
+(define (restore-read-tokens! ctx read-tokens-rev)
+  (for ([read-tok (in-list read-tokens-rev)])
+    (context-unread-token! ctx read-tok)))
+
+(define (retag-token tok name end-tok)
+  (make-position-token name
+                       (position-token-start-pos tok)
+                       (position-token-end-pos end-tok)))
+
+(define (retag-value-token tok name)
+  (make-position-token (make-token name (token-value (position-token-token tok)))
+                       (position-token-start-pos tok)
+                       (position-token-end-pos tok)))
+
+(define (retag-primitive-token tok token-name primitive-value)
+  (make-position-token (make-token token-name primitive-value)
+                       (position-token-start-pos tok)
+                       (position-token-end-pos tok)))
+
+(define (identifier-value-token name tok value)
+  (make-position-token (make-token name value)
+                       (position-token-start-pos tok)
+                       (position-token-end-pos tok)))
+
+(define (token-name-of tok)
+  (token-name (position-token-token tok)))
+
+(define (identifier-token? tok)
+  (memq (token-name-of tok) identifier-token-names))
+
+(define (expression-start-token? tok)
+  (memq (token-name-of tok) expression-start-token-names))
+
+(define (declaration-delimiter-token? tok)
+  (memq (token-name-of tok) '(ASSIGN COMMA SEMI)))
+
+(define (primitive-token-value token-value)
+  (case token-value
+    [(BOOLEAN) 'boolean]
+    [(CHAR) 'char]
+    [(BYTE) 'byte]
+    [(SHORT) 'short]
+    [(INT) 'int]
+    [(LONG) 'long]
+    [(FLOAT) 'float]
+    [(DOUBLE) 'double]
+    [else #f]))
+
+(define (matching-gt-before-expression-boundary? ctx)
+  (let loop ([depth 0] [read-tokens-rev '()])
+    (define lookahead-tok (context-read-token ctx))
+    (define lookahead-name (token-name-of lookahead-tok))
+    (define next-read-tokens-rev (cons lookahead-tok read-tokens-rev))
     (cond
-      [(identifier-token? next-tok)
-       (unread-significant-token next-tok)
-       (normalize (read-significant-token))]
+      [(eq? lookahead-name 'EOF)
+       (restore-read-tokens! ctx next-read-tokens-rev)
+       #f]
+      [(and (zero? depth)
+            (memq lookahead-name '(RPAREN SEMI ASSIGN COLON ARROW LBRACE RBRACE)))
+       (restore-read-tokens! ctx next-read-tokens-rev)
+       #f]
+      [(eq? lookahead-name 'LT)
+       (loop (add1 depth) next-read-tokens-rev)]
+      [(and (eq? lookahead-name 'GT) (positive? depth))
+       (loop (sub1 depth) next-read-tokens-rev)]
+      [(eq? lookahead-name 'GT)
+       (restore-read-tokens! ctx next-read-tokens-rev)
+       #t]
+      [(and (eq? lookahead-name 'GT_SINGLE) (positive? depth))
+       (loop (sub1 depth) next-read-tokens-rev)]
+      [(and (eq? lookahead-name 'GT_SINGLE) (zero? depth))
+       (restore-read-tokens! ctx next-read-tokens-rev)
+       #t]
       [else
-       (unread-significant-token next-tok)
-       (restore-read-tokens annotation-tokens-rev)
-       #f]))
-  (define (normalize tok)
-    (define token-value (token-name-of tok))
+       (loop depth next-read-tokens-rev)])))
+
+(define (for-primitive-token-name ctx)
+  (define maybe-name-tok (context-read-token ctx))
+  (define delimiter-tok
     (cond
-      [(and (eq? previous-emitted-token-name 'FOR)
-            (eq? last-emitted-token-name 'LPAREN)
-            (primitive-token-value token-value))
-       (retag-primitive-token tok (for-primitive-token-name) (primitive-token-value token-value))]
-      [(and (eq? token-value 'THIS)
-            (memq last-emitted-token-name '(IDENTIFIER TYPE_IDENTIFIER)))
-       (define next-tok (read-significant-token))
-       (if (memq (token-name-of next-tok) '(RPAREN COMMA))
-           (begin
-             (unread-significant-token next-tok)
-             (make-position-token (make-token 'IDENTIFIER "this")
-                                  (position-token-start-pos tok)
-                                  (position-token-end-pos tok)))
-           (begin
-             (unread-significant-token next-tok)
-             tok))]
-      [(and (eq? token-value 'AT)
-            (eq? last-emitted-token-name 'INSTANCEOF))
-       (retag-token tok 'PATTERN_AT tok)]
-      [(and (eq? token-value 'AT)
-            (eq? last-emitted-token-name 'LPAREN)
-            (not (memq previous-emitted-token-name '(IDENTIFIER TYPE_IDENTIFIER THIS SUPER))))
-       (retag-token tok 'CAST_AT tok)]
-      [(and (eq? token-value 'AT)
-            (memq last-emitted-token-name
-                  '(IDENTIFIER TYPE_IDENTIFIER INSTANCEOF_PATTERN_TYPE
-                               BOOLEAN BYTE CHAR SHORT INT LONG FLOAT DOUBLE))
-            (varargs-annotation-lookahead?))
-       (retag-token tok 'EMPTY_BRACKETS (consume-through-ellipsis!))]
-      [(and (eq? token-value 'AT)
-            (eq? previous-emitted-token-name 'AT)
-            (identifier-token? (make-position-token (make-token last-emitted-token-name #f)
-                                                    (position-token-start-pos tok)
-                                                    (position-token-end-pos tok))))
-       (or (skip-current-annotation-before-type) tok)]
-      [(eq? token-value 'AT)
-       (define next-tok (read-significant-token))
-       (if (eq? (token-name-of next-tok) 'INTERFACE)
-           (retag-token tok 'AT_INTERFACE next-tok)
-           (begin
-             (unread-significant-token next-tok)
-             tok))]
-      [(eq? token-value 'DOT)
-       (define next-tok (read-significant-token))
-       (cond
-         [(eq? (token-name-of next-tok) 'MUL)
-          (retag-token tok 'DOT_MUL next-tok)]
-         [(eq? (token-name-of next-tok) 'AT)
-          (read-annotation-tail '())
-          tok]
-         [else
-          (unread-significant-token next-tok)
-          tok])]
-      [(eq? token-value 'LBRACK)
-       (define next-tok (read-significant-token))
-       (if (eq? (token-name-of next-tok) 'RBRACK)
-           (retag-token tok 'EMPTY_BRACKETS next-tok)
-           (begin
-             (unread-significant-token next-tok)
-             tok))]
-      [(eq? token-value 'LPAREN)
-       (define maybe-type-tok (read-significant-token))
-       (define maybe-rparen-tok (read-significant-token))
-       (define maybe-expr-tok (read-significant-token))
-       (cond
-         [(and (not (memq last-emitted-token-name cast-lookahead-blockers))
-               (eq? (token-name-of maybe-type-tok) 'IDENTIFIER)
-               (eq? (token-name-of maybe-rparen-tok) 'RPAREN)
-               (expression-start-token? maybe-expr-tok))
-         (unread-significant-token maybe-expr-tok)
-         (unread-significant-token maybe-rparen-tok)
-         (unread-significant-token (retag-value-token maybe-type-tok 'TYPE_IDENTIFIER))
-         tok]
-         [(and (not (memq last-emitted-token-name cast-lookahead-blockers))
-               (eq? (token-name-of maybe-type-tok) 'IDENTIFIER)
-               (eq? (token-name-of maybe-rparen-tok) 'BITAND))
-          (unread-significant-token maybe-expr-tok)
-          (unread-significant-token maybe-rparen-tok)
-          (unread-significant-token (retag-value-token maybe-type-tok 'TYPE_IDENTIFIER))
-          tok]
-         [else
-          (unread-significant-token maybe-expr-tok)
-          (unread-significant-token maybe-rparen-tok)
-          (unread-significant-token maybe-type-tok)
-          tok])]
-      [(eq? token-value 'IDENTIFIER)
-       (cond
-         [(eq? last-emitted-token-name 'CASE)
-          (define maybe-name-tok (read-significant-token))
-          (unread-significant-token maybe-name-tok)
-          (if (identifier-token? maybe-name-tok)
-              (retag-value-token tok 'INSTANCEOF_PATTERN_TYPE)
-              tok)]
-         [(eq? last-emitted-token-name 'INSTANCEOF)
-          (define maybe-name-tok (read-significant-token))
-          (unread-significant-token maybe-name-tok)
-          (if (identifier-token? maybe-name-tok)
-              (retag-value-token tok 'INSTANCEOF_PATTERN_TYPE)
-              tok)]
-         [else
-          (define maybe-lbrack-tok (read-significant-token))
-          (cond
-            [(and (not (eq? last-emitted-token-name 'AT))
-                  (eq? (token-name-of maybe-lbrack-tok) 'LBRACK))
-             (define maybe-rbrack-tok (read-significant-token))
-             (cond
-               [(eq? (token-name-of maybe-rbrack-tok) 'RBRACK)
-                (define maybe-name-tok (read-significant-token))
-                (unread-significant-token maybe-name-tok)
-                (unread-significant-token maybe-rbrack-tok)
-                (unread-significant-token maybe-lbrack-tok)
-                (if (identifier-token? maybe-name-tok)
-                    (retag-value-token tok 'TYPE_IDENTIFIER)
-                    tok)]
-            [else
-             (unread-significant-token maybe-rbrack-tok)
-             (unread-significant-token maybe-lbrack-tok)
-             tok])]
-            [(and (not (eq? last-emitted-token-name 'AT))
-                  (eq? (token-name-of maybe-lbrack-tok) 'DOT))
-             (define segment-tok (read-significant-token))
-             (define maybe-name-tok (read-significant-token))
-             (define maybe-delimiter-tok (read-significant-token))
-             (unread-significant-token maybe-delimiter-tok)
-             (unread-significant-token maybe-name-tok)
-             (unread-significant-token segment-tok)
-             (unread-significant-token maybe-lbrack-tok)
-             (if (and (identifier-token? segment-tok)
-                      (or (and (identifier-token? maybe-name-tok)
-                               (declaration-delimiter-token? maybe-delimiter-tok))
-                          (and (eq? (token-name-of maybe-name-tok) 'LT)
-                               (not (eq? last-emitted-token-name 'NEW)))))
-                 (retag-value-token tok 'TYPE_IDENTIFIER)
-                 tok)]
-            [else
-             (unread-significant-token maybe-lbrack-tok)
-             tok])])]
-      [(eq? token-value 'LT)
-       (define next-tok (read-significant-token))
-       (cond
-         [(eq? (token-name-of next-tok) 'LT)
-          (unread-significant-token next-tok)
-          tok]
-         [else
-          (unread-significant-token next-tok)
-          (if (matching-gt-before-expression-boundary?)
-              tok
-              (retag-token tok 'LT_SINGLE tok))])]
-      [(eq? token-value 'GT)
-       (define next-tok (read-significant-token))
-       (cond
-         [(eq? (token-name-of next-tok) 'GT)
-          (unread-significant-token next-tok)
-          tok]
-         [else
-          (unread-significant-token next-tok)
-          (retag-token tok 'GT_SINGLE tok)])]
-      [(eq? token-value 'VAR)
-       (define next-tok (read-significant-token))
-       (cond
-         [(eq? (token-name-of next-tok) 'DOT)
-          (unread-significant-token next-tok)
-          (make-position-token (make-token 'IDENTIFIER "var")
-                               (position-token-start-pos tok)
-                               (position-token-end-pos tok))]
-         [(identifier-token? next-tok)
-          (define next-next-tok (read-significant-token))
-          (define next-next-token-value (token-name-of next-next-tok))
-          (unread-significant-token next-next-tok)
-          (unread-significant-token next-tok)
-          (if (memq next-next-token-value '(ASSIGN COLON COMMA RPAREN))
-              (retag-token tok 'VAR_DECL tok)
-              tok)]
-         [else
-          (unread-significant-token next-tok)
-          tok])]
-      [(assoc token-value contextual-package-token-values)
-       => (lambda (token-name/value)
-            (define next-tok (read-significant-token))
-            (if (memq (token-name-of next-tok) '(DOT LT))
-                (begin
-                  (unread-significant-token next-tok)
-                  (make-position-token (make-token 'IDENTIFIER (cdr token-name/value))
-                                       (position-token-start-pos tok)
-                                       (position-token-end-pos tok)))
-                (begin
-                  (unread-significant-token next-tok)
-                  tok)))]
-      [else tok]))
+      [(eq? (token-name-of maybe-name-tok) 'LBRACK)
+       (define maybe-rbrack-tok (context-read-token ctx))
+       (define maybe-array-name-tok (context-read-token ctx))
+       (define maybe-delimiter-tok (context-read-token ctx))
+       (context-unread-token! ctx maybe-delimiter-tok)
+       (context-unread-token! ctx maybe-array-name-tok)
+       (context-unread-token! ctx maybe-rbrack-tok)
+       (context-unread-token! ctx maybe-name-tok)
+       maybe-delimiter-tok]
+      [else
+       (define maybe-delimiter-tok (context-read-token ctx))
+       (context-unread-token! ctx maybe-delimiter-tok)
+       (context-unread-token! ctx maybe-name-tok)
+       maybe-delimiter-tok]))
+  (if (eq? (token-name-of delimiter-tok) 'COLON)
+      'PRIMITIVE_ENHANCED
+      'PRIMITIVE_DECL))
+
+(define (skip-balanced-after-lparen ctx read-tokens-rev)
+  (let loop ([depth 1] [read-tokens-rev read-tokens-rev])
+    (define tok (context-read-token ctx))
+    (define name (token-name-of tok))
+    (define next-read-tokens-rev (cons tok read-tokens-rev))
+    (cond
+      [(eq? name 'EOF) next-read-tokens-rev]
+      [(eq? name 'LPAREN) (loop (add1 depth) next-read-tokens-rev)]
+      [(and (eq? name 'RPAREN) (= depth 1)) next-read-tokens-rev]
+      [(eq? name 'RPAREN) (loop (sub1 depth) next-read-tokens-rev)]
+      [else (loop depth next-read-tokens-rev)])))
+
+(define (read-annotation-tail ctx read-tokens-rev)
+  (define name-tok (context-read-token ctx))
+  (let loop ([read-tokens-rev (cons name-tok read-tokens-rev)])
+    (define maybe-tail-tok (context-read-token ctx))
+    (define maybe-tail-name (token-name-of maybe-tail-tok))
+    (define next-read-tokens-rev (cons maybe-tail-tok read-tokens-rev))
+    (cond
+      [(eq? maybe-tail-name 'DOT)
+       (define segment-tok (context-read-token ctx))
+       (loop (cons segment-tok next-read-tokens-rev))]
+      [(eq? maybe-tail-name 'LPAREN)
+       (skip-balanced-after-lparen ctx next-read-tokens-rev)]
+      [else
+       (context-unread-token! ctx maybe-tail-tok)
+       read-tokens-rev])))
+
+(define (varargs-annotation-lookahead? ctx)
+  (let loop ([read-tokens-rev '()])
+    (define after-annotation-rev (read-annotation-tail ctx read-tokens-rev))
+    (define next-tok (context-read-token ctx))
+    (define next-name (token-name-of next-tok))
+    (define next-read-tokens-rev (cons next-tok after-annotation-rev))
+    (cond
+      [(eq? next-name 'ELLIPSIS)
+       (restore-read-tokens! ctx next-read-tokens-rev)
+       #t]
+      [(eq? next-name 'AT)
+       (loop next-read-tokens-rev)]
+      [else
+       (restore-read-tokens! ctx next-read-tokens-rev)
+       #f])))
+
+(define (consume-through-ellipsis! ctx)
+  (let loop ()
+    (define tok (context-read-token ctx))
+    (if (or (eq? (token-name-of tok) 'ELLIPSIS)
+            (eq? (token-name-of tok) 'EOF))
+        tok
+        (loop))))
+
+(define (skip-current-annotation-before-type ctx)
+  (define annotation-tokens-rev (read-annotation-tail ctx '()))
+  (define next-tok (context-read-token ctx))
+  (cond
+    [(identifier-token? next-tok)
+     (context-unread-token! ctx next-tok)
+     (normalize-token ctx (context-read-token ctx))]
+    [else
+     (context-unread-token! ctx next-tok)
+     (restore-read-tokens! ctx annotation-tokens-rev)
+     #f]))
+
+(define (normalize-for-primitive-token ctx tok token-value)
+  (and (eq? (token-context-previous ctx) 'FOR)
+       (eq? (token-context-last ctx) 'LPAREN)
+       (primitive-token-value token-value)
+       (retag-primitive-token tok
+                              (for-primitive-token-name ctx)
+                              (primitive-token-value token-value))))
+
+(define (normalize-receiver-this ctx tok token-value)
+  (and (eq? token-value 'THIS)
+       (memq (token-context-last ctx) '(IDENTIFIER TYPE_IDENTIFIER))
+       (let ([next-tok (context-read-token ctx)])
+         (if (memq (token-name-of next-tok) '(RPAREN COMMA))
+             (begin
+               (context-unread-token! ctx next-tok)
+               (identifier-value-token 'IDENTIFIER tok "this"))
+             (begin
+               (context-unread-token! ctx next-tok)
+               #f)))))
+
+(define (normalize-annotation-token ctx tok)
+  (define last-token-name (token-context-last ctx))
+  (define previous-token-name (token-context-previous ctx))
+  (cond
+    [(eq? last-token-name 'INSTANCEOF)
+     (retag-token tok 'PATTERN_AT tok)]
+    [(and (eq? last-token-name 'LPAREN)
+          (not (memq previous-token-name '(IDENTIFIER TYPE_IDENTIFIER THIS SUPER))))
+     (retag-token tok 'CAST_AT tok)]
+    [(and (memq last-token-name
+                '(IDENTIFIER TYPE_IDENTIFIER INSTANCEOF_PATTERN_TYPE
+                             BOOLEAN BYTE CHAR SHORT INT LONG FLOAT DOUBLE))
+          (varargs-annotation-lookahead? ctx))
+     (retag-token tok 'EMPTY_BRACKETS (consume-through-ellipsis! ctx))]
+    [(and (eq? previous-token-name 'AT)
+          (identifier-token? (make-position-token (make-token last-token-name #f)
+                                                  (position-token-start-pos tok)
+                                                  (position-token-end-pos tok))))
+     (or (skip-current-annotation-before-type ctx) tok)]
+    [else
+     (define next-tok (context-read-token ctx))
+     (if (eq? (token-name-of next-tok) 'INTERFACE)
+         (retag-token tok 'AT_INTERFACE next-tok)
+         (begin
+           (context-unread-token! ctx next-tok)
+           tok))]))
+
+(define (normalize-dot-token ctx tok)
+  (define next-tok (context-read-token ctx))
+  (cond
+    [(eq? (token-name-of next-tok) 'MUL)
+     (retag-token tok 'DOT_MUL next-tok)]
+    [(eq? (token-name-of next-tok) 'AT)
+     (read-annotation-tail ctx '())
+     tok]
+    [else
+     (context-unread-token! ctx next-tok)
+     tok]))
+
+(define (normalize-empty-brackets-token ctx tok)
+  (define next-tok (context-read-token ctx))
+  (if (eq? (token-name-of next-tok) 'RBRACK)
+      (retag-token tok 'EMPTY_BRACKETS next-tok)
+      (begin
+        (context-unread-token! ctx next-tok)
+        tok)))
+
+(define (normalize-lparen-token ctx tok)
+  (define maybe-type-tok (context-read-token ctx))
+  (define maybe-rparen-tok (context-read-token ctx))
+  (define maybe-expr-tok (context-read-token ctx))
+  (define cast-start?
+    (and (not (memq (token-context-last ctx) cast-lookahead-blockers))
+         (eq? (token-name-of maybe-type-tok) 'IDENTIFIER)))
+  (cond
+    [(and cast-start?
+          (eq? (token-name-of maybe-rparen-tok) 'RPAREN)
+          (expression-start-token? maybe-expr-tok))
+     (context-unread-token! ctx maybe-expr-tok)
+     (context-unread-token! ctx maybe-rparen-tok)
+     (context-unread-token! ctx (retag-value-token maybe-type-tok 'TYPE_IDENTIFIER))
+     tok]
+    [(and cast-start?
+          (eq? (token-name-of maybe-rparen-tok) 'BITAND))
+     (context-unread-token! ctx maybe-expr-tok)
+     (context-unread-token! ctx maybe-rparen-tok)
+     (context-unread-token! ctx (retag-value-token maybe-type-tok 'TYPE_IDENTIFIER))
+     tok]
+    [else
+     (context-unread-token! ctx maybe-expr-tok)
+     (context-unread-token! ctx maybe-rparen-tok)
+     (context-unread-token! ctx maybe-type-tok)
+     tok]))
+
+(define (identifier-array-type-start? ctx)
+  (define maybe-rbrack-tok (context-read-token ctx))
+  (cond
+    [(eq? (token-name-of maybe-rbrack-tok) 'RBRACK)
+     (define maybe-name-tok (context-read-token ctx))
+     (context-unread-token! ctx maybe-name-tok)
+     (context-unread-token! ctx maybe-rbrack-tok)
+     (identifier-token? maybe-name-tok)]
+    [else
+     (context-unread-token! ctx maybe-rbrack-tok)
+     #f]))
+
+(define (identifier-qualified-type-start? ctx)
+  (define segment-tok (context-read-token ctx))
+  (define maybe-name-tok (context-read-token ctx))
+  (define maybe-delimiter-tok (context-read-token ctx))
+  (context-unread-token! ctx maybe-delimiter-tok)
+  (context-unread-token! ctx maybe-name-tok)
+  (context-unread-token! ctx segment-tok)
+  (and (identifier-token? segment-tok)
+       (or (and (identifier-token? maybe-name-tok)
+                (declaration-delimiter-token? maybe-delimiter-tok))
+           (and (eq? (token-name-of maybe-name-tok) 'LT)
+                (not (eq? (token-context-last ctx) 'NEW))))))
+
+(define (normalize-identifier-token ctx tok)
+  (define last-token-name (token-context-last ctx))
+  (cond
+    [(eq? last-token-name 'CASE)
+     (define maybe-name-tok (context-read-token ctx))
+     (context-unread-token! ctx maybe-name-tok)
+     (if (identifier-token? maybe-name-tok)
+         (retag-value-token tok 'INSTANCEOF_PATTERN_TYPE)
+         tok)]
+    [(eq? last-token-name 'INSTANCEOF)
+     (define maybe-name-tok (context-read-token ctx))
+     (context-unread-token! ctx maybe-name-tok)
+     (if (identifier-token? maybe-name-tok)
+         (retag-value-token tok 'INSTANCEOF_PATTERN_TYPE)
+         tok)]
+    [else
+     (define maybe-lbrack-tok (context-read-token ctx))
+     (cond
+       [(and (not (eq? last-token-name 'AT))
+             (eq? (token-name-of maybe-lbrack-tok) 'LBRACK))
+        (define array-type-start? (identifier-array-type-start? ctx))
+        (context-unread-token! ctx maybe-lbrack-tok)
+        (if array-type-start?
+            (retag-value-token tok 'TYPE_IDENTIFIER)
+            tok)]
+       [(and (not (eq? last-token-name 'AT))
+             (eq? (token-name-of maybe-lbrack-tok) 'DOT))
+        (define qualified-type-start? (identifier-qualified-type-start? ctx))
+        (context-unread-token! ctx maybe-lbrack-tok)
+        (if qualified-type-start?
+            (retag-value-token tok 'TYPE_IDENTIFIER)
+            tok)]
+       [else
+        (context-unread-token! ctx maybe-lbrack-tok)
+        tok])]))
+
+(define (normalize-lt-token ctx tok)
+  (define next-tok (context-read-token ctx))
+  (cond
+    [(eq? (token-name-of next-tok) 'LT)
+     (context-unread-token! ctx next-tok)
+     tok]
+    [else
+     (context-unread-token! ctx next-tok)
+     (if (matching-gt-before-expression-boundary? ctx)
+         tok
+         (retag-token tok 'LT_SINGLE tok))]))
+
+(define (normalize-gt-token ctx tok)
+  (define next-tok (context-read-token ctx))
+  (cond
+    [(eq? (token-name-of next-tok) 'GT)
+     (context-unread-token! ctx next-tok)
+     tok]
+    [else
+     (context-unread-token! ctx next-tok)
+     (retag-token tok 'GT_SINGLE tok)]))
+
+(define (normalize-var-token ctx tok)
+  (define next-tok (context-read-token ctx))
+  (cond
+    [(eq? (token-name-of next-tok) 'DOT)
+     (context-unread-token! ctx next-tok)
+     (identifier-value-token 'IDENTIFIER tok "var")]
+    [(identifier-token? next-tok)
+     (define next-next-tok (context-read-token ctx))
+     (define next-next-token-value (token-name-of next-next-tok))
+     (context-unread-token! ctx next-next-tok)
+     (context-unread-token! ctx next-tok)
+     (if (memq next-next-token-value '(ASSIGN COLON COMMA RPAREN))
+         (retag-token tok 'VAR_DECL tok)
+         tok)]
+    [else
+     (context-unread-token! ctx next-tok)
+     tok]))
+
+(define (normalize-contextual-keyword-token ctx tok token-value)
+  (define token-name/value (assoc token-value contextual-keyword-token-values))
+  (and token-name/value
+       (let ([next-tok (context-read-token ctx)])
+         (if (memq (token-name-of next-tok) '(DOT LT))
+             (begin
+               (context-unread-token! ctx next-tok)
+               (identifier-value-token 'IDENTIFIER tok (cdr token-name/value)))
+             (begin
+               (context-unread-token! ctx next-tok)
+               #f)))))
+
+(define (normalize-token ctx tok)
+  (define token-value (token-name-of tok))
+  (or (normalize-for-primitive-token ctx tok token-value)
+      (normalize-receiver-this ctx tok token-value)
+      (case token-value
+        [(AT) (normalize-annotation-token ctx tok)]
+        [(DOT) (normalize-dot-token ctx tok)]
+        [(LBRACK) (normalize-empty-brackets-token ctx tok)]
+        [(LPAREN) (normalize-lparen-token ctx tok)]
+        [(IDENTIFIER) (normalize-identifier-token ctx tok)]
+        [(LT) (normalize-lt-token ctx tok)]
+        [(GT) (normalize-gt-token ctx tok)]
+        [(VAR) (normalize-var-token ctx tok)]
+        [else (normalize-contextual-keyword-token ctx tok token-value)])
+      tok))
+
+(define (make-next-significant-token port)
+  (define ctx (token-context port '() #f #f))
   (lambda ()
-    (define tok (normalize (read-significant-token)))
-    (set! previous-emitted-token-name last-emitted-token-name)
-    (set! last-emitted-token-name (token-name-of tok))
+    (define tok (normalize-token ctx (context-read-token ctx)))
+    (set-token-context-previous! ctx (token-context-last ctx))
+    (set-token-context-last! ctx (token-name-of tok))
     tok))
 
 (define (fold-left-expression first rest)
@@ -418,6 +480,16 @@
       with-suffixes
       (ast-expression (list with-suffixes postfix-op))))
 
+(define (make-variable-declarator-id name array-suffixes)
+  (ast-variable-declarator-id (list name array-suffixes)))
+
+(define (make-empty-bracket-array-suffixes)
+  (list (ast-type-array-suffix (list '() 'LBRACK 'RBRACK))))
+
+(define (make-named-formal-parameter modifiers type varargs name array-suffixes)
+  (ast-formal-parameter
+   (list modifiers type varargs (make-variable-declarator-id name array-suffixes))))
+
 (define (make-type-identifier-pattern type name)
   (ast-case-pattern
    (list
@@ -427,8 +499,7 @@
            '()
            (list
             (ast-variable-declarator
-             (list (ast-variable-declarator-id (list name '()))
-                   '()))))))))
+             (list (make-variable-declarator-id name '()) '()))))))))
 
 (define (make-reference-type name type-arguments suffixes array-suffixes)
   (ast-type-type
@@ -461,8 +532,67 @@
 (define (make-local-type-rest type declarators)
   (ast-local-variable-declaration-rest (list type declarators)))
 
+(define (make-local-type-block modifiers type declarators)
+  (make-local-variable-block modifiers (make-local-type-rest type declarators)))
+
+(define (make-primitive-local-type-rest primitive array-suffixes declarators)
+  (make-local-type-rest (make-primitive-type primitive array-suffixes) declarators))
+
+(define (make-reference-local-type-block name type-arguments suffixes array-suffixes declarators)
+  (make-local-type-block '()
+                         (make-reference-type name type-arguments suffixes array-suffixes)
+                         declarators))
+
+(define (make-for-local-type-control type declarators condition update)
+  (ast-for-control
+   (list
+    (ast-for-init
+     (list (ast-local-variable-declaration
+            (list '() (make-local-type-rest type declarators)))))
+    'SEMI
+    condition
+    'SEMI
+    update)))
+
+(define (make-for-reference-local-type-control
+         name type-arguments suffixes array-suffixes declarators condition update)
+  (make-for-local-type-control
+   (make-reference-type name type-arguments suffixes array-suffixes)
+   declarators
+   condition
+   update))
+
+(define (make-enhanced-for-type-control modifiers type declarator-id expr)
+  (ast-for-control
+   (list (ast-enhanced-for-control
+          (list modifiers type declarator-id 'COLON expr)))))
+
+(define (make-reference-enhanced-for-control
+         modifiers name type-arguments suffixes array-suffixes declarator-id expr)
+  (make-enhanced-for-type-control
+   modifiers
+   (make-reference-type name type-arguments suffixes array-suffixes)
+   declarator-id
+   expr))
+
 (define (make-var-type-rest name expr)
   (ast-local-variable-declaration-rest (list 'VAR name 'ASSIGN expr)))
+
+(define (make-interface-common-method type name parameters brackets throws body)
+  (ast-interface-common-body-declaration
+   (list '()
+         (ast-type-type-or-void (list type))
+         name
+         parameters
+         brackets
+         throws
+         body)))
+
+(define (make-interface-member-method type name parameters brackets throws body)
+  (ast-interface-member-declaration
+   (list
+    (ast-interface-method-declaration
+     (list '() (make-interface-common-method type name parameters brackets throws body))))))
 
 (define (make-simple-method-reference name type-arguments method-name)
   (ast-expression
@@ -486,6 +616,10 @@
   [main
    [() '()]
    [(s main) (cons $1 $2)]])
+(define-grammar-operator (*-prec s precedence)
+  [main
+   [() (prec precedence) '()]
+   [(s main) (cons $1 $2)]])
 (define-grammar-operator (+ s)
   [main
    [(s) (cons $1 '())]
@@ -506,8 +640,23 @@
                    tok-name tok-value))]
    [src-pos]
    [tokens empty-tokens tokens]
-   [expected-SR-conflicts 1704]
-   [expected-RR-conflicts 1033]
+   [precs (right ASSIGN ADD_ASSIGN SUB_ASSIGN MUL_ASSIGN DIV_ASSIGN
+                 AND_ASSIGN OR_ASSIGN XOR_ASSIGN MOD_ASSIGN
+                 LSHIFT_ASSIGN RSHIFT_ASSIGN URSHIFT_ASSIGN)
+          (right QUESTION)
+          (left OR)
+          (left AND)
+          (left BITOR)
+          (left CARET)
+          (left BITAND)
+          (left EQUAL NOTEQUAL)
+          (left LT_SINGLE GT_SINGLE LE GE INSTANCEOF)
+          (left LT GT)
+          (left ADD SUB)
+          (left MUL DIV MOD)
+          (right AT FINAL LBRACK EMPTY_BRACKETS)]
+   [expected-SR-conflicts 1631]
+   [expected-RR-conflicts 968]
    [grammar
     [compilationUnit
      [((* annotation) compilationUnit.1) (ast-compilation-unit (list $1 $2))]]
@@ -663,39 +812,17 @@
      [(SEMI) (ast-interface-body-declaration (list 'SEMI))]]
     [interfaceMemberDeclaration
      [(recordDeclaration) (ast-interface-member-declaration (list $1))]
-     [(primitiveType (* typeType.3) identifier (* brackets) ASSIGN variableInitializer (* interfaceCommonMemberDeclaration.3) SEMI)
+     [(primitiveType (*-prec typeType.3 EMPTY_BRACKETS) identifier (* brackets) ASSIGN variableInitializer (* interfaceCommonMemberDeclaration.3) SEMI)
       (ast-interface-member-declaration
        (list
         (ast-const-declaration
          (list
           (cons (ast-constant-declarator (list $3 $4 'ASSIGN $6)) $7)
           'SEMI))))]
-     [(primitiveType (* typeType.3) identifier formalParameters (* brackets) (? interfaceCommonBodyDeclaration.6) methodBody)
-      (ast-interface-member-declaration
-       (list
-        (ast-interface-method-declaration
-         (list '()
-               (ast-interface-common-body-declaration
-                (list '()
-                      (ast-type-type-or-void (list (make-primitive-type $1 $2)))
-                      $3
-                      $4
-                      $5
-                      $6
-                      $7))))))]
-     [(IDENTIFIER (? typeArguments) (* classType.2) (* typeType.3) identifier formalParameters (* brackets) (? interfaceCommonBodyDeclaration.6) methodBody)
-      (ast-interface-member-declaration
-       (list
-        (ast-interface-method-declaration
-         (list '()
-               (ast-interface-common-body-declaration
-                (list '()
-                      (ast-type-type-or-void (list (make-reference-type $1 $2 $3 $4)))
-                      $5
-                      $6
-                      $7
-                      $8
-                      $9))))))]
+     [(primitiveType (*-prec typeType.3 EMPTY_BRACKETS) identifier formalParameters (* brackets) (? interfaceCommonBodyDeclaration.6) methodBody)
+      (make-interface-member-method (make-primitive-type $1 $2) $3 $4 $5 $6 $7)]
+     [(IDENTIFIER (? typeArguments) (* classType.2) (*-prec typeType.3 EMPTY_BRACKETS) identifier formalParameters (* brackets) (? interfaceCommonBodyDeclaration.6) methodBody)
+      (make-interface-member-method (make-reference-type $1 $2 $3 $4) $5 $6 $7 $8 $9)]
      [(interfaceMethodDeclaration) (ast-interface-member-declaration (list $1))]
      [(genericInterfaceMethodDeclaration) (ast-interface-member-declaration (list $1))]
      [(constDeclaration) (ast-interface-member-declaration (list $1))]
@@ -732,24 +859,10 @@
     [genericInterfaceMethodDeclaration
      [((* interfaceMethodModifier) typeParameters interfaceCommonBodyDeclaration) (ast-generic-interface-method-declaration (list $1 $2 $3))]]
     [interfaceCommonBodyDeclaration
-     [(primitiveType (* typeType.3) identifier formalParameters (* brackets) (? interfaceCommonBodyDeclaration.6) methodBody)
-      (ast-interface-common-body-declaration
-       (list '()
-             (ast-type-type-or-void (list (make-primitive-type $1 $2)))
-             $3
-             $4
-             $5
-             $6
-             $7))]
-     [(IDENTIFIER (? typeArguments) (* classType.2) (* typeType.3) identifier formalParameters (* brackets) (? interfaceCommonBodyDeclaration.6) methodBody)
-      (ast-interface-common-body-declaration
-       (list '()
-             (ast-type-type-or-void (list (make-reference-type $1 $2 $3 $4)))
-             $5
-             $6
-             $7
-             $8
-             $9))]
+     [(primitiveType (*-prec typeType.3 EMPTY_BRACKETS) identifier formalParameters (* brackets) (? interfaceCommonBodyDeclaration.6) methodBody)
+      (make-interface-common-method (make-primitive-type $1 $2) $3 $4 $5 $6 $7)]
+     [(IDENTIFIER (? typeArguments) (* classType.2) (*-prec typeType.3 EMPTY_BRACKETS) identifier formalParameters (* brackets) (? interfaceCommonBodyDeclaration.6) methodBody)
+      (make-interface-common-method (make-reference-type $1 $2 $3 $4) $5 $6 $7 $8 $9)]
      [((* annotation) typeTypeOrVoid identifier formalParameters (* brackets) (? interfaceCommonBodyDeclaration.6) methodBody) (ast-interface-common-body-declaration (list $1 $2 $3 $4 $5 $6 $7))]]
     [interfaceCommonBodyDeclaration.6
      [(THROWS qualifiedNameList) (ast-interface-common-body-declaration-throws (list 'THROWS $2))]]
@@ -760,7 +873,7 @@
     [variableDeclarator.2
      [(ASSIGN variableInitializer) (ast-variable-declarator-initializer (list 'ASSIGN $2))]]
     [variableDeclaratorId
-     [(identifier (* brackets)) (ast-variable-declarator-id (list $1 $2))]]
+     [(identifier (* brackets)) (make-variable-declarator-id $1 $2)]]
     [variableInitializer
      [(arrayInitializer) (ast-variable-initializer (list $1))]
      [(expression) (ast-variable-initializer (list $1))]]
@@ -779,7 +892,7 @@
     [packageName
      [((sep-by DOT identifier)) $1]]
     [typeArgument
-     [(TYPE_IDENTIFIER (? typeArguments) (* classType.2) (* typeType.3))
+     [(TYPE_IDENTIFIER (? typeArguments) (* classType.2) (*-prec typeType.3 EMPTY_BRACKETS))
       (ast-type-argument (list (make-reference-type $1 $2 $3 $4)))]
      [(typeType) (ast-type-argument (list $1))]
      [((* annotation) QUESTION (? typeArgument.3)) (ast-type-argument (list $1 'QUESTION $3))]]
@@ -856,35 +969,14 @@
     [formalParameterList
      [((sep-by COMMA formalParameter)) $1]]
     [formalParameter
-     [(typeIdentifier (? typeArguments) (* classType.2) (* typeType.3) (? formalParameter.3) variableDeclaratorId)
-      (ast-formal-parameter (list
-            '()
-            (ast-type-type (list
-                  '()
-                  (ast-type-base (list
-                        (ast-class-or-interface-type (list
-                              (ast-class-type (list $1 $2 $3))))))
-                  $4))
-            $5
-            $6))]
-     [(primitiveType (* typeType.3) (? formalParameter.3) variableDeclaratorId)
-      (ast-formal-parameter (list
-            '()
-            (ast-type-type (list '() (ast-type-base (list $1)) $2))
-            $3
-            $4))]
-     [((* variableModifier) IDENTIFIER (+ typeType.3) identifier)
-      (ast-formal-parameter (list
-            $1
-            (make-reference-type $2 '() '() $3)
-            '()
-            (ast-variable-declarator-id (list $4 '()))))]
-     [((* variableModifier) IDENTIFIER (? typeArguments) (* classType.2) (* typeType.3) identifier)
-      (ast-formal-parameter (list
-            $1
-            (make-reference-type $2 $3 $4 $5)
-            '()
-            (ast-variable-declarator-id (list $6 '()))))]
+     [(typeIdentifier (? typeArguments) (* classType.2) (*-prec typeType.3 EMPTY_BRACKETS) (? formalParameter.3) variableDeclaratorId)
+      (ast-formal-parameter (list '() (make-reference-type $1 $2 $3 $4) $5 $6))]
+     [(primitiveType (*-prec typeType.3 EMPTY_BRACKETS) (? formalParameter.3) variableDeclaratorId)
+      (ast-formal-parameter (list '() (make-primitive-type $1 $2) $3 $4))]
+     [((*-prec variableModifier FINAL) IDENTIFIER (+ typeType.3) identifier)
+      (make-named-formal-parameter $1 (make-reference-type $2 '() '() $3) '() $4 '())]
+     [((*-prec variableModifier FINAL) IDENTIFIER (? typeArguments) (* classType.2) (*-prec typeType.3 EMPTY_BRACKETS) identifier)
+      (make-named-formal-parameter $1 (make-reference-type $2 $3 $4 $5) '() $6 '())]
      [(IDENTIFIER DOT IDENTIFIER DOT IDENTIFIER DOT IDENTIFIER typeArguments identifier)
       (ast-formal-parameter
        (list
@@ -897,7 +989,7 @@
                (ast-class-type-suffix (list 'DOT '() $7 $8)))
          '())
         '()
-        (ast-variable-declarator-id (list $9 '()))))]
+        (make-variable-declarator-id $9 '())))]
      [(IDENTIFIER DOT IDENTIFIER DOT IDENTIFIER typeArguments identifier)
       (ast-formal-parameter
        (list
@@ -909,7 +1001,7 @@
                (ast-class-type-suffix (list 'DOT '() $5 $6)))
          '())
         '()
-        (ast-variable-declarator-id (list $7 '()))))]
+        (make-variable-declarator-id $7 '())))]
      [(IDENTIFIER DOT IDENTIFIER typeArguments identifier)
       (ast-formal-parameter
        (list
@@ -920,7 +1012,7 @@
          (list (ast-class-type-suffix (list 'DOT '() $3 $4)))
          '())
         '()
-        (ast-variable-declarator-id (list $5 '()))))]
+        (make-variable-declarator-id $5 '())))]
      [(IDENTIFIER DOT IDENTIFIER DOT IDENTIFIER identifier)
       (ast-formal-parameter
        (list
@@ -932,30 +1024,32 @@
                (ast-class-type-suffix (list 'DOT '() $5 '())))
          '())
         '()
-        (ast-variable-declarator-id (list $6 '()))))]
+        (make-variable-declarator-id $6 '())))]
      [((+ annotation) IDENTIFIER emptyBrackets identifier)
-      (ast-formal-parameter (list
-            (map ast-variable-modifier $1)
-            (make-reference-type $2 '() '() (list (ast-type-array-suffix (list '() 'LBRACK 'RBRACK))))
-            '()
-            (ast-variable-declarator-id (list $4 '()))))]
-     [((* variableModifier) IDENTIFIER emptyBrackets identifier)
-      (ast-formal-parameter (list
-            $1
-            (make-reference-type $2 '() '() (list (ast-type-array-suffix (list '() 'LBRACK 'RBRACK))))
-            '()
-            (ast-variable-declarator-id (list $4 '()))))]
-     [((* variableModifier) IDENTIFIER (? typeArguments) (* classType.2) (* typeType.3) ELLIPSIS variableDeclaratorId)
+      (make-named-formal-parameter
+       (map ast-variable-modifier $1)
+       (make-reference-type $2 '() '() (make-empty-bracket-array-suffixes))
+       '()
+       $4
+       '())]
+     [((*-prec variableModifier FINAL) IDENTIFIER emptyBrackets identifier)
+      (make-named-formal-parameter
+       $1
+       (make-reference-type $2 '() '() (make-empty-bracket-array-suffixes))
+       '()
+       $4
+       '())]
+     [((*-prec variableModifier FINAL) IDENTIFIER (? typeArguments) (* classType.2) (*-prec typeType.3 EMPTY_BRACKETS) ELLIPSIS variableDeclaratorId)
       (ast-formal-parameter (list
             $1
             (make-reference-type $2 $3 $4 $5)
             (ast-formal-parameter-varargs (list '() 'ELLIPSIS))
             $7))]
-     [((* variableModifier) typeType (? formalParameter.3) variableDeclaratorId) (ast-formal-parameter (list $1 $2 $3 $4))]]
+     [((*-prec variableModifier FINAL) typeType (? formalParameter.3) variableDeclaratorId) (ast-formal-parameter (list $1 $2 $3 $4))]]
     [lambdaLVTIList
      [((sep-by COMMA lambdaLVTIParameter)) $1]]
     [lambdaLVTIParameter
-     [((* variableModifier) VAR_DECL identifier) (ast-lambda-lvti-parameter (list $1 'VAR $3))]]
+     [((*-prec variableModifier FINAL) VAR_DECL identifier) (ast-lambda-lvti-parameter (list $1 'VAR $3))]]
     [qualifiedName
      [((sep-by DOT identifier)) $1]]
     [literal
@@ -1063,45 +1157,39 @@
     [blockStatement
      [(VAR_DECL identifier ASSIGN expression SEMI)
       (make-local-variable-block '() (make-var-type-rest $2 $4))]
-     [(primitiveType (* typeType.3) variableDeclarators SEMI)
-      (make-local-variable-block '() (make-local-type-rest (make-primitive-type $1 $2) $3))]
-     [(IDENTIFIER typeArguments (* classType.2) (* typeType.3) variableDeclarators SEMI)
-      (make-local-variable-block '() (make-local-type-rest (make-reference-type $1 $2 $3 $4) $5))]
-     [(OPENS typeArguments (* classType.2) (* typeType.3) variableDeclarators SEMI)
-      (make-local-variable-block '() (make-local-type-rest (make-reference-type "opens" $2 $3 $4) $5))]
-     [(TYPE_IDENTIFIER DOT IDENTIFIER typeArguments (* classType.2) (* typeType.3) variableDeclarators SEMI)
-      (make-local-variable-block
+     [(primitiveType (*-prec typeType.3 EMPTY_BRACKETS) variableDeclarators SEMI)
+      (make-local-type-block '() (make-primitive-type $1 $2) $3)]
+     [(IDENTIFIER typeArguments (* classType.2) (*-prec typeType.3 EMPTY_BRACKETS) variableDeclarators SEMI)
+      (make-reference-local-type-block $1 $2 $3 $4 $5)]
+     [(OPENS typeArguments (* classType.2) (*-prec typeType.3 EMPTY_BRACKETS) variableDeclarators SEMI)
+      (make-reference-local-type-block "opens" $2 $3 $4 $5)]
+     [(TYPE_IDENTIFIER DOT IDENTIFIER typeArguments (* classType.2) (*-prec typeType.3 EMPTY_BRACKETS) variableDeclarators SEMI)
+      (make-reference-local-type-block
+       $1
        '()
-       (make-local-type-rest
-        (make-reference-type
-         $1
-         '()
-         (cons (ast-class-type-suffix (list 'DOT '() $3 $4)) $5)
-         $6)
-        $7))]
-     [(TYPE_IDENTIFIER DOT IDENTIFIER (* classType.2) (* typeType.3) variableDeclarators SEMI)
-      (make-local-variable-block
+       (cons (ast-class-type-suffix (list 'DOT '() $3 $4)) $5)
+       $6
+       $7)]
+     [(TYPE_IDENTIFIER DOT IDENTIFIER (* classType.2) (*-prec typeType.3 EMPTY_BRACKETS) variableDeclarators SEMI)
+      (make-reference-local-type-block
+       $1
        '()
-       (make-local-type-rest
-        (make-reference-type
-         $1
-         '()
-         (cons (ast-class-type-suffix (list 'DOT '() $3 '())) $4)
-         $5)
-        $6))]
-     [(typeIdentifier typeArguments (+ classType.2) (* typeType.3) variableDeclarators SEMI)
-      (make-local-variable-block '() (make-local-type-rest (make-reference-type $1 $2 $3 $4) $5))]
-     [(IDENTIFIER (? typeArguments) (+ classType.2) (* typeType.3) variableDeclarators SEMI)
-      (make-local-variable-block '() (make-local-type-rest (make-reference-type $1 $2 $3 $4) $5))]
+       (cons (ast-class-type-suffix (list 'DOT '() $3 '())) $4)
+       $5
+       $6)]
+     [(typeIdentifier typeArguments (+ classType.2) (*-prec typeType.3 EMPTY_BRACKETS) variableDeclarators SEMI)
+      (make-reference-local-type-block $1 $2 $3 $4 $5)]
+     [(IDENTIFIER (? typeArguments) (+ classType.2) (*-prec typeType.3 EMPTY_BRACKETS) variableDeclarators SEMI)
+      (make-reference-local-type-block $1 $2 $3 $4 $5)]
      [(IDENTIFIER (? typeArguments) (* classType.2) (+ typeType.3) variableDeclarators SEMI)
-      (make-local-variable-block '() (make-local-type-rest (make-reference-type $1 $2 $3 $4) $5))]
-     [(typeIdentifier (? typeArguments) (* classType.2) (* typeType.3) variableDeclarators SEMI)
-      (make-local-variable-block '() (make-local-type-rest (make-reference-type $1 $2 $3 $4) $5))]
+      (make-reference-local-type-block $1 $2 $3 $4 $5)]
+     [(typeIdentifier (? typeArguments) (* classType.2) (*-prec typeType.3 EMPTY_BRACKETS) variableDeclarators SEMI)
+      (make-reference-local-type-block $1 $2 $3 $4 $5)]
      [(localVariableDeclaration SEMI) (ast-block-statement (list $1))]
      [(localTypeDeclaration) $1]
      [(statement) $1]]
     [localVariableDeclaration
-     [((* variableModifier) localVariableDeclaration.2) (ast-local-variable-declaration (list $1 $2))]]
+     [((*-prec variableModifier FINAL) localVariableDeclaration.2) (ast-local-variable-declaration (list $1 $2))]]
     [localVariableDeclaration.2
      [(VAR_DECL identifier ASSIGN expression) (make-var-type-rest $2 $4)]
      [(typeType variableDeclarators) (ast-local-variable-declaration-rest (list $1 $2))]]
@@ -1172,7 +1260,7 @@
      [((+ catchClause) (? finallyBlock)) (ast-statement-try-rest (list $1 $2))]
      [(finallyBlock) (ast-statement-try-rest (list $1))]]
     [catchClause
-     [(CATCH LPAREN (* variableModifier) catchType identifier RPAREN block) (ast-catch-clause (list 'CATCH 'LPAREN $3 $4 $5 'RPAREN $7))]]
+     [(CATCH LPAREN (*-prec variableModifier FINAL) catchType identifier RPAREN block) (ast-catch-clause (list 'CATCH 'LPAREN $3 $4 $5 'RPAREN $7))]]
     [catchType
      [((sep-by BITOR qualifiedName)) $1]]
     [finallyBlock
@@ -1182,10 +1270,10 @@
     [resources
      [((sep-by SEMI resource)) $1]]
     [resource
-     [((* variableModifier) VAR_DECL identifier ASSIGN expression) (ast-resource (list $1 'VAR $3 'ASSIGN $5))]
-     [(IDENTIFIER (? typeArguments) (* classType.2) (* typeType.3) variableDeclaratorId ASSIGN expression)
+     [((*-prec variableModifier FINAL) VAR_DECL identifier ASSIGN expression) (ast-resource (list $1 'VAR $3 'ASSIGN $5))]
+     [(IDENTIFIER (? typeArguments) (* classType.2) (*-prec typeType.3 EMPTY_BRACKETS) variableDeclaratorId ASSIGN expression)
       (ast-resource (list '() (ast-class-or-interface-type (list (ast-class-type (list $1 $2 $3)))) $5 'ASSIGN $7))]
-     [((* variableModifier) classOrInterfaceType variableDeclaratorId ASSIGN expression) (ast-resource (list $1 $2 $3 'ASSIGN $5))]
+     [((*-prec variableModifier FINAL) classOrInterfaceType variableDeclaratorId ASSIGN expression) (ast-resource (list $1 $2 $3 'ASSIGN $5))]
      [(qualifiedName) (ast-resource (list $1))]]
     [switchBlockStatementGroup
      [((+ switchBlockStatementGroup.1) (+ blockStatement)) (ast-switch-block-statement-group (list $1 $2))]]
@@ -1194,7 +1282,7 @@
     [switchLabel
      [(CASE expression) (ast-switch-label (list 'CASE $2))]
      [(CASE IDENTIFIER) (ast-switch-label (list 'CASE $2))]
-     [(CASE INSTANCEOF_PATTERN_TYPE (? typeArguments) (* classType.2) (* typeType.3) identifier)
+     [(CASE INSTANCEOF_PATTERN_TYPE (? typeArguments) (* classType.2) (*-prec typeType.3 EMPTY_BRACKETS) identifier)
       (ast-switch-label (list 'CASE (make-type-identifier-pattern (make-reference-type $2 $3 $4 $5) $6)))]
      [(CASE typeType identifier) (ast-switch-label (list 'CASE $2 $3))]
      [(DEFAULT) 'default]]
@@ -1207,44 +1295,36 @@
         $3
         'SEMI
         $5))]
-     [(IDENTIFIER typeArguments (* classType.2) (* typeType.3) variableDeclarators SEMI (? expression) SEMI (? expressionList))
-      (ast-for-control
-       (list
-        (ast-for-init
-         (list (ast-local-variable-declaration
-                (list '() (make-local-type-rest (make-reference-type $1 $2 $3 $4) $5)))))
-        'SEMI
-        $7
-        'SEMI
-        $9))]
-     [((* variableModifier) VAR_DECL variableDeclaratorId COLON expression) (ast-for-control (list (ast-enhanced-for-control (list $1 'VAR $3 'COLON $5))))]
-     [(PRIMITIVE_ENHANCED (* typeType.3) variableDeclaratorId COLON expression)
-      (ast-for-control (list (ast-enhanced-for-control (list '() (make-primitive-type $1 $2) $3 'COLON $5))))]
-     [(IDENTIFIER (? typeArguments) (* classType.2) (* typeType.3) variableDeclaratorId COLON expression)
-      (ast-for-control (list (ast-enhanced-for-control (list '() (make-reference-type $1 $2 $3 $4) $5 'COLON $7))))]
-     [((* variableModifier) primitiveType (* typeType.3) variableDeclaratorId COLON expression)
-      (ast-for-control (list (ast-enhanced-for-control (list $1 (make-primitive-type $2 $3) $4 'COLON $6))))]
+     [(IDENTIFIER typeArguments (* classType.2) (*-prec typeType.3 EMPTY_BRACKETS) variableDeclarators SEMI (? expression) SEMI (? expressionList))
+      (make-for-reference-local-type-control $1 $2 $3 $4 $5 $7 $9)]
+     [((*-prec variableModifier FINAL) VAR_DECL variableDeclaratorId COLON expression) (ast-for-control (list (ast-enhanced-for-control (list $1 'VAR $3 'COLON $5))))]
+     [(PRIMITIVE_ENHANCED (*-prec typeType.3 EMPTY_BRACKETS) variableDeclaratorId COLON expression)
+      (make-enhanced-for-type-control '() (make-primitive-type $1 $2) $3 $5)]
+     [(IDENTIFIER (? typeArguments) (* classType.2) (*-prec typeType.3 EMPTY_BRACKETS) variableDeclaratorId COLON expression)
+      (make-reference-enhanced-for-control '() $1 $2 $3 $4 $5 $7)]
+     [((*-prec variableModifier FINAL) primitiveType (*-prec typeType.3 EMPTY_BRACKETS) variableDeclaratorId COLON expression)
+      (make-enhanced-for-type-control $1 (make-primitive-type $2 $3) $4 $6)]
      [(enhancedForControl) (ast-for-control (list $1))]
      [((? forInit) SEMI (? expression) SEMI (? expressionList)) (ast-for-control (list $1 'SEMI $3 'SEMI $5))]]
     [forPrimitiveLocalVariableDeclaration
-     [((* variableModifier) forPrimitiveLocalVariableDeclaration.2)
+     [((*-prec variableModifier FINAL) forPrimitiveLocalVariableDeclaration.2)
       (ast-local-variable-declaration (list $1 $2))]]
     [forPrimitiveLocalVariableDeclaration.2
-     [(PRIMITIVE_DECL (* typeType.3) variableDeclarators) (make-local-type-rest (make-primitive-type $1 $2) $3)]
-     [(BOOLEAN (* typeType.3) variableDeclarators) (make-local-type-rest (make-primitive-type 'boolean $2) $3)]
-     [(CHAR (* typeType.3) variableDeclarators) (make-local-type-rest (make-primitive-type 'char $2) $3)]
-     [(BYTE (* typeType.3) variableDeclarators) (make-local-type-rest (make-primitive-type 'byte $2) $3)]
-     [(SHORT (* typeType.3) variableDeclarators) (make-local-type-rest (make-primitive-type 'short $2) $3)]
-     [(INT (* typeType.3) variableDeclarators) (make-local-type-rest (make-primitive-type 'int $2) $3)]
-     [(LONG (* typeType.3) variableDeclarators) (make-local-type-rest (make-primitive-type 'long $2) $3)]
-     [(FLOAT (* typeType.3) variableDeclarators) (make-local-type-rest (make-primitive-type 'float $2) $3)]
-     [(DOUBLE (* typeType.3) variableDeclarators) (make-local-type-rest (make-primitive-type 'double $2) $3)]]
+     [(PRIMITIVE_DECL (*-prec typeType.3 EMPTY_BRACKETS) variableDeclarators) (make-primitive-local-type-rest $1 $2 $3)]
+     [(BOOLEAN (*-prec typeType.3 EMPTY_BRACKETS) variableDeclarators) (make-primitive-local-type-rest 'boolean $2 $3)]
+     [(CHAR (*-prec typeType.3 EMPTY_BRACKETS) variableDeclarators) (make-primitive-local-type-rest 'char $2 $3)]
+     [(BYTE (*-prec typeType.3 EMPTY_BRACKETS) variableDeclarators) (make-primitive-local-type-rest 'byte $2 $3)]
+     [(SHORT (*-prec typeType.3 EMPTY_BRACKETS) variableDeclarators) (make-primitive-local-type-rest 'short $2 $3)]
+     [(INT (*-prec typeType.3 EMPTY_BRACKETS) variableDeclarators) (make-primitive-local-type-rest 'int $2 $3)]
+     [(LONG (*-prec typeType.3 EMPTY_BRACKETS) variableDeclarators) (make-primitive-local-type-rest 'long $2 $3)]
+     [(FLOAT (*-prec typeType.3 EMPTY_BRACKETS) variableDeclarators) (make-primitive-local-type-rest 'float $2 $3)]
+     [(DOUBLE (*-prec typeType.3 EMPTY_BRACKETS) variableDeclarators) (make-primitive-local-type-rest 'double $2 $3)]]
     [forInit
      [(localVariableDeclaration) (ast-for-init (list $1))]
      [(expressionList) (ast-for-init (list $1))]]
     [enhancedForControl
-     [((* variableModifier) typeType variableDeclaratorId COLON expression) (ast-enhanced-for-control (list $1 $2 $3 'COLON $5))]
-     [((* variableModifier) VAR_DECL variableDeclaratorId COLON expression) (ast-enhanced-for-control (list $1 'VAR $3 'COLON $5))]]
+     [((*-prec variableModifier FINAL) typeType variableDeclaratorId COLON expression) (ast-enhanced-for-control (list $1 $2 $3 'COLON $5))]
+     [((*-prec variableModifier FINAL) VAR_DECL variableDeclaratorId COLON expression) (ast-enhanced-for-control (list $1 'VAR $3 'COLON $5))]]
     [expressionList
      [((sep-by COMMA expression)) $1]]
     [methodCall
@@ -1255,73 +1335,64 @@
      [(lambdaExpression) (ast-expression (list $1))]
      [(assignmentExpression) $1]]
     [assignmentExpression
-     [(conditionalExpression) $1]
+     [(conditionalExpression) (prec ASSIGN) $1]
      [(conditionalExpression expression.39 expression) (ast-expression (list $1 $2 $3))]]
     [conditionalExpression
-     [(logicalOrExpression) $1]
+     [(logicalOrExpression) (prec QUESTION) $1]
      [(logicalOrExpression QUESTION expression COLON expression) (ast-expression (list $1 'QUESTION $3 'COLON $5))]]
     [logicalOrExpression
-     [(logicalAndExpression (* logicalOrExpression.2)) (fold-left-expression $1 $2)]]
-    [logicalOrExpression.2
-     [(OR logicalAndExpression) (list 'OR $2)]]
+     [(logicalAndExpression) (prec OR) $1]
+     [(logicalOrExpression OR logicalAndExpression) (ast-expression (list $1 'OR $3))]]
     [logicalAndExpression
-     [(inclusiveOrExpression (* logicalAndExpression.2)) (fold-left-expression $1 $2)]]
-    [logicalAndExpression.2
-     [(AND inclusiveOrExpression) (list 'AND $2)]]
+     [(inclusiveOrExpression) (prec AND) $1]
+     [(logicalAndExpression AND inclusiveOrExpression) (ast-expression (list $1 'AND $3))]]
     [inclusiveOrExpression
-     [(exclusiveOrExpression (* inclusiveOrExpression.2)) (fold-left-expression $1 $2)]]
-    [inclusiveOrExpression.2
-     [(BITOR exclusiveOrExpression) (list 'BITOR $2)]]
+     [(exclusiveOrExpression) (prec BITOR) $1]
+     [(inclusiveOrExpression BITOR exclusiveOrExpression) (ast-expression (list $1 'BITOR $3))]]
     [exclusiveOrExpression
-     [(andExpression (* exclusiveOrExpression.2)) (fold-left-expression $1 $2)]]
-    [exclusiveOrExpression.2
-     [(CARET andExpression) (list 'CARET $2)]]
+     [(andExpression) (prec CARET) $1]
+     [(exclusiveOrExpression CARET andExpression) (ast-expression (list $1 'CARET $3))]]
     [andExpression
-     [(equalityExpression (* andExpression.2)) (fold-left-expression $1 $2)]]
-    [andExpression.2
-     [(BITAND equalityExpression) (list 'BITAND $2)]]
+     [(equalityExpression) (prec BITAND) $1]
+     [(andExpression BITAND equalityExpression) (ast-expression (list $1 'BITAND $3))]]
     [equalityExpression
-     [(relationalExpression (* equalityExpression.2)) (fold-left-expression $1 $2)]]
-    [equalityExpression.2
-     [(expression.32 relationalExpression) (list $1 $2)]]
+     [(relationalExpression) (prec EQUAL) $1]
+     [(equalityExpression expression.32 relationalExpression) (ast-expression (list $1 $2 $3))]]
     [relationalExpression
-     [(shiftExpression (* relationalExpression.2)) (fold-left-expression $1 $2)]]
-    [relationalExpression.2
-     [(expression.29 shiftExpression) (list $1 $2)]
-     [(INSTANCEOF FINAL (* variableModifier) typeType (* annotation) variableDeclarators)
-      (list 'INSTANCEOF (ast-pattern (list (cons 'final $3) $4 $5 $6)))]
-     [(INSTANCEOF (+ patternAnnotation) FINAL (* variableModifier) typeType (* annotation) variableDeclarators)
-      (list 'INSTANCEOF (ast-pattern (list (append $2 (cons 'final $4)) $5 $6 $7)))]
-     [(INSTANCEOF (+ patternAnnotation) IDENTIFIER (? typeArguments) (* classType.2) (* typeType.3) identifier)
-      (list
-       'INSTANCEOF
-       (ast-pattern
-        (list
-         $2
-         (make-reference-type $3 $4 $5 $6)
-         '()
+     [(shiftExpression) (prec LT_SINGLE) $1]
+     [(relationalExpression expression.29 shiftExpression) (ast-expression (list $1 $2 $3))]
+     [(relationalExpression INSTANCEOF FINAL (*-prec variableModifier FINAL) typeType (* annotation) variableDeclarators)
+      (ast-expression (list $1 'INSTANCEOF (ast-pattern (list (cons 'final $4) $5 $6 $7))))]
+     [(relationalExpression INSTANCEOF (+ patternAnnotation) FINAL (*-prec variableModifier FINAL) typeType (* annotation) variableDeclarators)
+      (ast-expression (list $1 'INSTANCEOF (ast-pattern (list (append $3 (cons 'final $5)) $6 $7 $8))))]
+     [(relationalExpression INSTANCEOF (+ patternAnnotation) IDENTIFIER (? typeArguments) (* classType.2) (*-prec typeType.3 EMPTY_BRACKETS) identifier)
+      (ast-expression
+       (list
+        $1
+        'INSTANCEOF
+        (ast-pattern
          (list
-          (ast-variable-declarator
-           (list (ast-variable-declarator-id (list $7 '())) '()))))))]
-     [(INSTANCEOF INSTANCEOF_PATTERN_TYPE (? typeArguments) (* classType.2) (* typeType.3) identifier)
-      (list 'INSTANCEOF (make-type-identifier-pattern (make-reference-type $2 $3 $4 $5) $6))]
-     [(INSTANCEOF typeType) (list 'INSTANCEOF $2)]
-     [(INSTANCEOF pattern) (list 'INSTANCEOF $2)]]
+          $3
+          (make-reference-type $4 $5 $6 $7)
+          '()
+          (list
+           (ast-variable-declarator
+            (list (ast-variable-declarator-id (list $8 '())) '())))))))]
+     [(relationalExpression INSTANCEOF INSTANCEOF_PATTERN_TYPE (? typeArguments) (* classType.2) (*-prec typeType.3 EMPTY_BRACKETS) identifier)
+      (ast-expression (list $1 'INSTANCEOF (make-type-identifier-pattern (make-reference-type $3 $4 $5 $6) $7)))]
+     [(relationalExpression INSTANCEOF typeType) (ast-expression (list $1 'INSTANCEOF $3))]]
     [shiftExpression
-     [(additiveExpression (* shiftExpression.2)) (fold-left-expression $1 $2)]]
-    [shiftExpression.2
-     [(expression.28 additiveExpression) (list $1 $2)]]
+     [(additiveExpression) (prec LT) $1]
+     [(shiftExpression expression.28 additiveExpression) (ast-expression (list $1 $2 $3))]]
     [additiveExpression
-     [(multiplicativeExpression (* additiveExpression.2)) (fold-left-expression $1 $2)]]
-    [additiveExpression.2
-     [(expression.27 multiplicativeExpression) (list $1 $2)]]
+     [(multiplicativeExpression) (prec ADD) $1]
+     [(additiveExpression expression.27 multiplicativeExpression) (ast-expression (list $1 $2 $3))]]
     [multiplicativeExpression
-     [(unaryExpression (* multiplicativeExpression.2)) (fold-left-expression $1 $2)]]
-    [multiplicativeExpression.2
-     [(expression.26 unaryExpression) (list $1 $2)]]
+     [(unaryExpression) (prec MUL) $1]
+     [(multiplicativeExpression expression.26 unaryExpression) (ast-expression (list $1 $2 $3))]]
     [unaryExpression
      [(expression.20 unaryExpression) (ast-expression (list $1 $2))]
-     [(LPAREN primitiveType (* typeType.3) RPAREN expression)
+     [(LPAREN primitiveType (*-prec typeType.3 EMPTY_BRACKETS) RPAREN expression)
       (ast-expression
        (list 'LPAREN
              '()
@@ -1329,7 +1400,7 @@
              '()
              'RPAREN
              $5))]
-     [(LPAREN (+ castAnnotation) primitiveType (* typeType.3) RPAREN expression)
+     [(LPAREN (+ castAnnotation) primitiveType (*-prec typeType.3 EMPTY_BRACKETS) RPAREN expression)
       (ast-expression
        (list 'LPAREN
              '()
@@ -1337,7 +1408,7 @@
              '()
              'RPAREN
              $6))]
-     [(LPAREN IDENTIFIER (? typeArguments) (* classType.2) (* typeType.3) (+ expression.23) RPAREN lambdaExpression)
+     [(LPAREN IDENTIFIER (? typeArguments) (* classType.2) (*-prec typeType.3 EMPTY_BRACKETS) (+ expression.23) RPAREN lambdaExpression)
       (ast-expression
        (list 'LPAREN
              '()
@@ -1345,7 +1416,7 @@
              $6
              'RPAREN
              (ast-expression (list $8))))]
-     [(LPAREN (+ annotation) typeIdentifier (? typeArguments) (* classType.2) (* typeType.3) (* expression.23) RPAREN expression)
+     [(LPAREN (+ annotation) typeIdentifier (? typeArguments) (* classType.2) (*-prec typeType.3 EMPTY_BRACKETS) (* expression.23) RPAREN expression)
       (ast-expression
        (list 'LPAREN
              '()
@@ -1353,7 +1424,7 @@
              $7
              'RPAREN
              $9))]
-     [(LPAREN (+ castAnnotation) typeIdentifier (? typeArguments) (* classType.2) (* typeType.3) (* expression.23) RPAREN expression)
+     [(LPAREN (+ castAnnotation) typeIdentifier (? typeArguments) (* classType.2) (*-prec typeType.3 EMPTY_BRACKETS) (* expression.23) RPAREN expression)
       (ast-expression
        (list 'LPAREN
              '()
@@ -1361,7 +1432,7 @@
              $7
              'RPAREN
              $9))]
-     [(LPAREN typeIdentifier (? typeArguments) (* classType.2) (* typeType.3) (* expression.23) RPAREN expression)
+     [(LPAREN typeIdentifier (? typeArguments) (* classType.2) (*-prec typeType.3 EMPTY_BRACKETS) (* expression.23) RPAREN expression)
       (ast-expression
        (list 'LPAREN
              '()
@@ -1376,7 +1447,7 @@
              $6
              'RPAREN
              $8))]
-     [(LPAREN typeIdentifier (? typeArguments) (* classType.2) (* typeType.3) (* expression.23) RPAREN identifier COLONCOLON (? typeArguments) identifier)
+     [(LPAREN typeIdentifier (? typeArguments) (* classType.2) (*-prec typeType.3 EMPTY_BRACKETS) (* expression.23) RPAREN identifier COLONCOLON (? typeArguments) identifier)
       (ast-expression
        (list 'LPAREN
              '()
@@ -1453,7 +1524,7 @@
      [(LSHIFT_ASSIGN) 'lshift-assign]
      [(MOD_ASSIGN) 'mod-assign]]
     [pattern
-      [((* variableModifier) typeType (* annotation) variableDeclarators) (ast-pattern (list $1 $2 $3 $4))]
+      [((*-prec variableModifier FINAL) typeType (* annotation) variableDeclarators) (ast-pattern (list $1 $2 $3 $4))]
       [(typeType LPAREN (? componentPatternList) RPAREN) (ast-pattern (list $1 'LPAREN $3 'RPAREN))]]
     [componentPatternList
      [((sep-by COMMA componentPattern)) $1]]
@@ -1486,7 +1557,7 @@
      [(CASE NULL_LITERAL switchLabeledRule.2.2 switchLabeledRule.3 switchRuleOutcome) (ast-switch-labeled-rule (list 'CASE 'NULL_LITERAL $3 $4 $5))]
      [(CASE IDENTIFIER switchLabeledRule.3 switchRuleOutcome) (ast-switch-labeled-rule (list 'CASE (list (make-identifier-expression $2)) $3 $4))]
      [(CASE VAR switchLabeledRule.3 switchRuleOutcome) (ast-switch-labeled-rule (list 'CASE (list (make-identifier-expression "var")) $3 $4))]
-     [(CASE INSTANCEOF_PATTERN_TYPE (? typeArguments) (* classType.2) (* typeType.3) identifier (? guard) switchLabeledRule.3 switchRuleOutcome)
+     [(CASE INSTANCEOF_PATTERN_TYPE (? typeArguments) (* classType.2) (*-prec typeType.3 EMPTY_BRACKETS) identifier (? guard) switchLabeledRule.3 switchRuleOutcome)
       (ast-switch-labeled-rule (list 'CASE (make-type-identifier-pattern (make-reference-type $2 $3 $4 $5) $6) $7 $8 $9))]
      [(CASE typeType identifier (? guard) switchLabeledRule.3 switchRuleOutcome) (ast-switch-labeled-rule (list 'CASE (make-type-identifier-pattern $2 $3) $4 $5 $6))]
      [(CASE (sep-by COMMA casePattern) (? guard) switchLabeledRule.3 switchRuleOutcome) (ast-switch-labeled-rule (list 'CASE $2 $3 $4 $5))]
@@ -1547,7 +1618,7 @@
     [typeList
      [((sep-by COMMA typeType)) $1]]
     [typeType
-     [((* annotation) typeType.2 (* typeType.3)) (ast-type-type (list $1 $2 $3))]]
+     [((* annotation) typeType.2 (*-prec typeType.3 EMPTY_BRACKETS)) (ast-type-type (list $1 $2 $3))]]
     [typeType.2
      [(classOrInterfaceType) (ast-type-base (list $1))]
      [(primitiveType) (ast-type-base (list $1))]]
@@ -1569,7 +1640,7 @@
      [(lt (sep-by COMMA typeArgument) gt) $2]
      [(lt typeArgumentWithClose) (list $2)]]
     [typeArgumentWithClose
-     [(TYPE_IDENTIFIER (? typeArguments) (* classType.2) (* typeType.3) gt)
+     [(TYPE_IDENTIFIER (? typeArguments) (* classType.2) (*-prec typeType.3 EMPTY_BRACKETS) gt)
       (ast-type-argument-with-close (list (make-reference-type $1 $2 $3 $4) 'GT))]
      [(typeType gt) (ast-type-argument-with-close (list $1 'GT))]]
     [lt
