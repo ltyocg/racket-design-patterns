@@ -64,6 +64,7 @@
    TRY
    USES
    VAR
+   VAR_DECL
    VOID
    VOLATILE
    WHEN
@@ -76,13 +77,17 @@
    LBRACE
    RBRACE
    LBRACK
+   EMPTY_BRACKETS
    RBRACK
    SEMI
    COMMA
    DOT
+   DOT_MUL
    ASSIGN
    GT
+   GT_SINGLE
    LT
+   LT_SINGLE
    BANG
    TILDE
    QUESTION
@@ -118,6 +123,9 @@
    COLONCOLON
    AT
    AT_INTERFACE
+   CAST_AT
+   PATTERN_AT
+   VARARGS_AT
    ELLIPSIS
    EOF))
 (define-tokens tokens
@@ -134,7 +142,11 @@
    WS
    COMMENT
    LINE_COMMENT
-   IDENTIFIER))
+   IDENTIFIER
+   INSTANCEOF_PATTERN_TYPE
+   PRIMITIVE_DECL
+   PRIMITIVE_ENHANCED
+   TYPE_IDENTIFIER))
 (define-lex-abbrev ExponentPart
   (:: (char-set "eE")
       (:? (char-set "+-"))
@@ -312,7 +324,9 @@
    [(:: "\"\"\""
         (:* (char-set " \t"))
         (char-set "\r\n")
-        (:? (:* (:or any-char EscapeSequence)))
+        (:* (:or (char-complement (char-set "\""))
+                 (:: #\" (char-complement (char-set "\"")))
+                 (:: #\" #\" (char-complement (char-set "\"")))))
         "\"\"\"")
     (token-TEXT_BLOCK lexeme)]
    ["null" (token-NULL_LITERAL)]
@@ -361,11 +375,15 @@
    [">>>=" (token-URSHIFT_ASSIGN)]
    ["->" (token-ARROW)]
    ["::" (token-COLONCOLON)]
-   ["@interface" (token-AT_INTERFACE)]
    ["@" (token-AT)]
    ["..." (token-ELLIPSIS)]
    [(:+ (char-set " \t\r\n\u000C")) (token-WS lexeme)]
-   [(:: "/*" (:? (:* any-char)) "*/") (token-COMMENT lexeme)]
+   [(:: "/*"
+        (:* (:or (char-complement (char-set "*"))
+                 (:: (:+ #\*) (char-complement (char-set "*/")))))
+        (:+ #\*)
+        "/")
+    (token-COMMENT lexeme)]
    [(:: "//" (:* (char-complement (char-set "\r\n")))) (token-LINE_COMMENT lexeme)]
    [(:: Letter (:* LetterOrDigit)) (token-IDENTIFIER lexeme)]
    [(eof) (token-EOF)]))
@@ -394,6 +412,21 @@
          tokenize-java)
 
 (module+ test
-  (require racket/pretty)
-  (define-runtime-path example-dir "./example")
-  (pretty-print (tokenize-java (build-path example-dir "Simple.java"))))
+  (require rackunit)
+
+  (define (token-name* tok)
+    (define raw (position-token-token tok))
+    (if (token? raw) (token-name raw) raw))
+
+  (define input
+    (open-input-string "class C { /* first */ int x; /* second */ }"))
+
+  (let loop ([comments 0])
+    (define tok (java-lexer input))
+    (cond
+      [(eq? (token-name* tok) 'EOF)
+       (check-equal? comments 2)]
+      [(eq? (token-name* tok) 'COMMENT)
+       (loop (add1 comments))]
+      [else
+       (loop comments)])))
