@@ -1,29 +1,43 @@
 #lang racket/base
 
 (require rackunit
-         parser-tools/lex
-         "lexer.rkt"
          "parser.rkt")
 
 (define (parse-ok source)
-  (check-not-exn (lambda () (parse-java-code source))))
+  (define ast (parse-java-code source))
+  (check-true (ast-node? ast))
+  (check-equal? (ast-node-kind ast) 'compilationunit))
 
 (define (parse-fails source)
   (check-exn exn:fail? (lambda () (parse-java-code source))))
 
-(define (token-name* tok)
-  (define raw (position-token-token tok))
-  (if (token? raw) (token-name raw) raw))
-
-(define (tokenize-source source)
-  (define input (open-input-string source))
-  (let loop ([tokens '()])
-    (define tok (java-lexer input))
-    (if (eq? (token-name* tok) 'EOF)
-        (reverse tokens)
-        (loop (cons tok tokens)))))
-
 (module+ test
+  (check-equal? (car (parse-java-parse-tree "class Raw {}"))
+                'compilationunit)
+  (check-equal? (ast-node-kind (java-parser "class FromString {}"))
+                'compilationunit)
+  (check-equal? (ast-node-kind (java-parser (open-input-string "class FromPort {}")))
+                'compilationunit)
+
+  (define comment-source "class C { /* block */ // line\n int x; }")
+  (define default-ast (parse-java-code comment-source))
+  (check-false (ast-find-kind 'COMMENT default-ast))
+  (check-false (ast-find-kind 'LINE_COMMENT default-ast))
+
+  (define hidden-ast (parse-java-code comment-source #:include-hidden? #t))
+  (check-equal? (map ast-token-text (ast-filter-kind 'COMMENT hidden-ast))
+                '("/* block */"))
+  (check-equal? (map ast-token-channel (ast-filter-kind 'COMMENT hidden-ast))
+                '(HIDDEN))
+  (check-equal? (map ast-token-text (ast-filter-kind 'LINE_COMMENT hidden-ast))
+                '("// line"))
+  (check-not-false (ast-find-kind 'WS hidden-ast))
+  (check-not-false (member "/* block */" (ast-token-texts hidden-ast)))
+  (check-false (member "/* block */"
+                       (ast-token-texts hidden-ast #:include-hidden? #f)))
+  (check-equal? (car (parse-java-parse-tree comment-source #:include-hidden? #t))
+                'compilationunit)
+
   (parse-ok "@ interface A {}")
   (parse-ok "import java.util.*; public class C {}")
   (parse-ok "module m { requires java.base; exports a.b; }")
@@ -43,10 +57,4 @@
 
   (parse-fails "class C { var f; }")
   (parse-fails "class C { void m() { var x; } }")
-  (parse-fails "class C { void m() { + + ; } }")
-
-  (let ([tokens (tokenize-source "class C { /* first */ int x; /* second */ }")])
-    (check-equal? (length (filter (lambda (tok)
-                                    (eq? (token-name* tok) 'COMMENT))
-                                  tokens))
-                  2)))
+  (parse-fails "class C { void m() { + + ; } }"))

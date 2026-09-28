@@ -1,161 +1,184 @@
 #lang racket/base
 
-;; Literal nodes with direct values.
-(struct ast-array-type () #:transparent)
-(struct ast-integer-literal (value) #:transparent)
-(struct ast-float-literal (value) #:transparent)
-(struct ast-char-literal (value) #:transparent)
-(struct ast-string-literal (value) #:transparent)
-(struct ast-bool-literal (value) #:transparent)
-(struct ast-null-literal () #:transparent)
-(struct ast-text-block (value) #:transparent)
+(require racket/list
+         racket/match)
 
-;; Grammar nodes. The children field stores the semantic children
-;; produced by the corresponding parser rule.
-(struct ast-alt-annotation-qualified-name (children) #:transparent)
-(struct ast-alt-annotation-qualified-name-prefix (children) #:transparent)
-(struct ast-annotation (children) #:transparent)
-(struct ast-annotation-constant-rest (children) #:transparent)
-(struct ast-annotation-field-value (children) #:transparent)
-(struct ast-annotation-method-rest (children) #:transparent)
-(struct ast-annotation-type-body (children) #:transparent)
-(struct ast-annotation-type-declaration (children) #:transparent)
-(struct ast-annotation-type-element-declaration (children) #:transparent)
-(struct ast-annotation-type-element-rest (children) #:transparent)
-(struct ast-annotation-value (children) #:transparent)
-(struct ast-array-creator-rest (children) #:transparent)
-(struct ast-array-creator-rest-sized-dimension (children) #:transparent)
-(struct ast-array-initializer (children) #:transparent)
-(struct ast-array-initializer-elements (children) #:transparent)
-(struct ast-block (children) #:transparent)
-(struct ast-block-statement (children) #:transparent)
-(struct ast-brackets (children) #:transparent)
-(struct ast-case-pattern (children) #:transparent)
-(struct ast-catch-clause (children) #:transparent)
-(struct ast-class-body (children) #:transparent)
-(struct ast-class-body-declaration (children) #:transparent)
-(struct ast-class-creator-rest (children) #:transparent)
-(struct ast-class-declaration (children) #:transparent)
-(struct ast-class-declaration-extends (children) #:transparent)
-(struct ast-class-declaration-implements (children) #:transparent)
-(struct ast-class-declaration-permits (children) #:transparent)
-(struct ast-class-or-interface-modifier (children) #:transparent)
-(struct ast-class-or-interface-type (children) #:transparent)
-(struct ast-class-type (children) #:transparent)
-(struct ast-class-type-segment (children) #:transparent)
-(struct ast-class-type-package-prefix (children) #:transparent)
-(struct ast-class-type-suffix (children) #:transparent)
-(struct ast-compact-constructor-declaration (children) #:transparent)
-(struct ast-compilation-unit (children) #:transparent)
-(struct ast-compilation-unit-body (children) #:transparent)
-(struct ast-compilation-unit-import (children) #:transparent)
-(struct ast-compilation-unit-type (children) #:transparent)
-(struct ast-component-pattern (children) #:transparent)
-(struct ast-const-declaration (children) #:transparent)
-(struct ast-constant-declarator (children) #:transparent)
-(struct ast-constructor-declaration (children) #:transparent)
-(struct ast-constructor-declaration-throws (children) #:transparent)
-(struct ast-created-name (children) #:transparent)
-(struct ast-created-name-suffix (children) #:transparent)
-(struct ast-creator (children) #:transparent)
-(struct ast-creator-rest (children) #:transparent)
-(struct ast-default-value (children) #:transparent)
-(struct ast-element-value (children) #:transparent)
-(struct ast-element-value-array-initializer (children) #:transparent)
-(struct ast-enhanced-for-control (children) #:transparent)
-(struct ast-enum-body-declarations (children) #:transparent)
-(struct ast-enum-constant (children) #:transparent)
-(struct ast-enum-constants (children) #:transparent)
-(struct ast-enum-declaration (children) #:transparent)
-(struct ast-enum-declaration-implements (children) #:transparent)
-(struct ast-explicit-generic-invocation (children) #:transparent)
-(struct ast-explicit-generic-invocation-suffix (children) #:transparent)
-(struct ast-expression (children) #:transparent)
-(struct ast-expression-intersection-type (children) #:transparent)
-(struct ast-field-declaration (children) #:transparent)
-(struct ast-finally-block (children) #:transparent)
-(struct ast-for-control (children) #:transparent)
-(struct ast-for-init (children) #:transparent)
-(struct ast-formal-parameter (children) #:transparent)
-(struct ast-formal-parameter-varargs (children) #:transparent)
-(struct ast-formal-parameters-body (children) #:transparent)
-(struct ast-formal-parameters-first (children) #:transparent)
-(struct ast-generic-constructor-declaration (children) #:transparent)
-(struct ast-generic-interface-member-declaration (children) #:transparent)
-(struct ast-generic-interface-method-declaration (children) #:transparent)
-(struct ast-generic-member-declaration (children) #:transparent)
-(struct ast-generic-method-declaration (children) #:transparent)
-(struct ast-guard (children) #:transparent)
-(struct ast-import-declaration (children) #:transparent)
-(struct ast-inner-creator (children) #:transparent)
-(struct ast-interface-body (children) #:transparent)
-(struct ast-interface-body-declaration (children) #:transparent)
-(struct ast-interface-common-body-declaration (children) #:transparent)
-(struct ast-interface-common-body-declaration-throws (children) #:transparent)
-(struct ast-interface-common-member-declaration (children) #:transparent)
-(struct ast-interface-declaration (children) #:transparent)
-(struct ast-interface-declaration-extends (children) #:transparent)
-(struct ast-interface-declaration-permits (children) #:transparent)
-(struct ast-interface-member-declaration (children) #:transparent)
-(struct ast-interface-method-declaration (children) #:transparent)
-(struct ast-interface-method-modifier (children) #:transparent)
-(struct ast-lambda-body (children) #:transparent)
-(struct ast-lambda-expression (children) #:transparent)
-(struct ast-lambda-lvti-parameter (children) #:transparent)
-(struct ast-lambda-parameters (children) #:transparent)
-(struct ast-local-type-declaration (children) #:transparent)
-(struct ast-local-variable-declaration (children) #:transparent)
-(struct ast-local-variable-declaration-rest (children) #:transparent)
-(struct ast-member-common-declaration (children) #:transparent)
-(struct ast-member-declaration (children) #:transparent)
-(struct ast-method-body (children) #:transparent)
-(struct ast-method-call (children) #:transparent)
-(struct ast-method-declaration (children) #:transparent)
-(struct ast-method-declaration-throws (children) #:transparent)
-(struct ast-modifier (children) #:transparent)
-(struct ast-modular-compilation-unit (children) #:transparent)
-(struct ast-module-declaration (children) #:transparent)
-(struct ast-module-directive (children) #:transparent)
-(struct ast-module-directive-to (children) #:transparent)
-(struct ast-non-wildcard-type-arguments (children) #:transparent)
-(struct ast-non-wildcard-type-arguments-or-diamond (children) #:transparent)
-(struct ast-package-declaration (children) #:transparent)
-(struct ast-pattern (children) #:transparent)
-(struct ast-primary (children) #:transparent)
-(struct ast-primary-generic-suffix (children) #:transparent)
-(struct ast-receiver-parameter (children) #:transparent)
-(struct ast-receiver-parameter-qualifier (children) #:transparent)
-(struct ast-record-body (children) #:transparent)
-(struct ast-record-component (children) #:transparent)
-(struct ast-record-component-varargs (children) #:transparent)
-(struct ast-record-declaration (children) #:transparent)
-(struct ast-resource (children) #:transparent)
-(struct ast-resource-specification (children) #:transparent)
-(struct ast-statement (children) #:transparent)
-(struct ast-statement-try-rest (children) #:transparent)
-(struct ast-super-suffix (children) #:transparent)
-(struct ast-switch-block-statement-group (children) #:transparent)
-(struct ast-switch-block-statement-group-label (children) #:transparent)
-(struct ast-switch-expression (children) #:transparent)
-(struct ast-switch-label (children) #:transparent)
-(struct ast-switch-labeled-rule (children) #:transparent)
-(struct ast-switch-rule-outcome (children) #:transparent)
-(struct ast-type-argument (children) #:transparent)
-(struct ast-type-argument-bound (children) #:transparent)
-(struct ast-type-argument-with-close (children) #:transparent)
-(struct ast-type-arguments-or-diamond (children) #:transparent)
-(struct ast-type-declaration (children) #:transparent)
-(struct ast-type-declaration-body (children) #:transparent)
-(struct ast-type-parameter (children) #:transparent)
-(struct ast-type-parameter-bound (children) #:transparent)
-(struct ast-type-type (children) #:transparent)
-(struct ast-type-base (children) #:transparent)
-(struct ast-type-array-suffix (children) #:transparent)
-(struct ast-type-type-or-void (children) #:transparent)
-(struct ast-variable-declarator (children) #:transparent)
-(struct ast-variable-declarator-initializer (children) #:transparent)
-(struct ast-variable-declarator-id (children) #:transparent)
-(struct ast-variable-initializer (children) #:transparent)
-(struct ast-variable-modifier (children) #:transparent)
+(provide (struct-out ast-node)
+         (struct-out ast-token)
+         ast?
+         ast-kind
+         ast-children
+         ast-token-hidden?
+         ast-token-visible?
+         ast-tokens
+         ast-token-texts
+         ast-filter
+         ast-filter-kind
+         ast-find
+         ast-find-kind
+         parse-tree->ast
+         ast->datum)
 
-(provide (all-defined-out))
+;; A small, grammar-agnostic AST facade over the ANTLR parse tree.
+;;
+;; Rule nodes keep the ANTLR rule name in `kind`; token nodes keep the ANTLR
+;; token name, source text, source span, and token channel. This deliberately
+;; avoids the old parser-tools-era model where every Java grammar rule had its
+;; own struct.
+(struct ast-node (kind children) #:transparent)
+(struct ast-token (kind text line column start stop channel) #:transparent)
+
+(define (ast? value)
+  (or (ast-node? value) (ast-token? value)))
+
+(define (ast-kind value)
+  (cond
+    [(ast-node? value) (ast-node-kind value)]
+    [(ast-token? value) (ast-token-kind value)]
+    [else (raise-argument-error 'ast-kind "ast?" value)]))
+
+(define (ast-children value)
+  (cond
+    [(ast-node? value) (ast-node-children value)]
+    [(ast-token? value) '()]
+    [else (raise-argument-error 'ast-children "ast?" value)]))
+
+(define (parse-tree->ast datum)
+  (cond
+    [(ast? datum) datum]
+    [else
+     (match datum
+       [(list 'token (? symbol? kind) (? string? text)
+              (? exact-integer? line) (? exact-integer? column)
+              (? exact-integer? start) (? exact-integer? stop)
+              (? symbol? channel))
+        (ast-token kind text line column start stop channel)]
+       [(list 'token (? symbol? kind) (? string? text)
+              (? exact-integer? line) (? exact-integer? column)
+              (? exact-integer? start) (? exact-integer? stop))
+        (ast-token kind text line column start stop 'DEFAULT)]
+       [(cons (? symbol? kind) children)
+        (ast-node kind (map parse-tree->ast children))]
+       [_
+        (raise-argument-error 'parse-tree->ast
+                              "ANTLR parse-tree datum"
+                              datum)])]))
+
+(define (ast->datum value #:include-channel? [include-channel? #t])
+  (cond
+    [(ast-node? value)
+     (cons (ast-node-kind value)
+           (map (lambda (child) (ast->datum child #:include-channel? include-channel?))
+                (ast-node-children value)))]
+    [(ast-token? value)
+     (define datum
+       (list 'token
+             (ast-token-kind value)
+             (ast-token-text value)
+             (ast-token-line value)
+             (ast-token-column value)
+             (ast-token-start value)
+             (ast-token-stop value)))
+     (if include-channel?
+         (append datum (list (ast-token-channel value)))
+         datum)]
+    [else (raise-argument-error 'ast->datum "ast?" value)]))
+
+(define (ast-token-hidden? value)
+  (and (ast-token? value)
+       (not (eq? (ast-token-channel value) 'DEFAULT))))
+
+(define (ast-token-visible? value)
+  (and (ast-token? value)
+       (not (ast-token-hidden? value))))
+
+(define (keep-token? token include-eof? include-hidden?)
+  (and (or include-eof? (not (eq? (ast-token-kind token) 'EOF)))
+       (or include-hidden? (not (ast-token-hidden? token)))))
+
+(define (ast-tokens value
+                    #:include-eof? [include-eof? #f]
+                    #:include-hidden? [include-hidden? #t])
+  (cond
+    [(ast-token? value)
+     (if (keep-token? value include-eof? include-hidden?)
+         (list value)
+         '())]
+    [(ast-node? value)
+     (append-map (lambda (child)
+                   (ast-tokens child
+                               #:include-eof? include-eof?
+                               #:include-hidden? include-hidden?))
+                 (ast-node-children value))]
+    [else (raise-argument-error 'ast-tokens "ast?" value)]))
+
+(define (ast-token-texts value
+                         #:include-eof? [include-eof? #f]
+                         #:include-hidden? [include-hidden? #t])
+  (map ast-token-text
+       (ast-tokens value
+                   #:include-eof? include-eof?
+                   #:include-hidden? include-hidden?)))
+
+(define (ast-filter pred value)
+  (unless (procedure? pred)
+    (raise-argument-error 'ast-filter "procedure?" pred))
+  (cond
+    [(ast-node? value)
+     (append (if (pred value) (list value) '())
+             (append-map (lambda (child) (ast-filter pred child))
+                         (ast-node-children value)))]
+    [(ast-token? value)
+     (if (pred value) (list value) '())]
+    [else (raise-argument-error 'ast-filter "ast?" value)]))
+
+(define (ast-filter-kind kind value)
+  (unless (symbol? kind)
+    (raise-argument-error 'ast-filter-kind "symbol?" kind))
+  (ast-filter (lambda (child) (eq? (ast-kind child) kind)) value))
+
+(define (ast-find pred value)
+  (unless (procedure? pred)
+    (raise-argument-error 'ast-find "procedure?" pred))
+  (cond
+    [(not (ast? value))
+     (raise-argument-error 'ast-find "ast?" value)]
+    [(pred value) value]
+    [(ast-node? value)
+     (let loop ([children (ast-node-children value)])
+       (cond
+         [(null? children) #f]
+         [else
+          (or (ast-find pred (car children))
+              (loop (cdr children)))]))]
+    [else #f]))
+
+(define (ast-find-kind kind value)
+  (unless (symbol? kind)
+    (raise-argument-error 'ast-find-kind "symbol?" kind))
+  (ast-find (lambda (child) (eq? (ast-kind child) kind)) value))
+
+(module+ test
+  (require rackunit)
+
+  (define datum
+    '(compilationunit
+      (typeDeclaration
+       (classDeclaration
+        (token CLASS "class" 1 0 0 4 DEFAULT)
+        (identifier (token IDENTIFIER "C" 1 6 6 6 DEFAULT))))
+      (token EOF "<EOF>" 1 7 7 6 DEFAULT)))
+
+  (define ast (parse-tree->ast datum))
+
+  (check-true (ast-node? ast))
+  (check-equal? (ast-node-kind ast) 'compilationunit)
+  (check-equal? (ast-kind (ast-find-kind 'CLASS ast)) 'CLASS)
+  (check-equal? (ast-token-channel (ast-find-kind 'CLASS ast)) 'DEFAULT)
+  (check-equal? (ast-token-texts ast) '("class" "C"))
+  (check-equal? (ast->datum ast) datum)
+
+  (define old-token-datum '(token IDENTIFIER "C" 1 0 0 0))
+  (define old-token (parse-tree->ast old-token-datum))
+  (check-equal? (ast-token-channel old-token) 'DEFAULT)
+  (check-equal? (ast->datum old-token #:include-channel? #f) old-token-datum))
